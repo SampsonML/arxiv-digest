@@ -281,6 +281,12 @@ fieldset.interest-edit details summary { cursor: pointer; color: var(--muted); f
 .categories .count { color: var(--accent); font-weight: normal; }
 .categories .checks { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 1rem; padding: .4rem 0; }
 .categories .checks label { display: block; margin: .15rem 0; font-weight: normal; font-size: .86rem; }
+.categories .select-all {
+  display: flex; align-items: center; gap: .45rem; margin: .5rem 0 .15rem; padding-bottom: .4rem;
+  border-bottom: 1px solid var(--border); font-weight: 600; font-size: .86rem; cursor: pointer;
+}
+.categories .select-all input { accent-color: var(--accent); }
+.categories .select-all .muted { font-weight: normal; font-size: .8rem; }
 .save { margin-top: 1.5rem; }
 .page > h1, .page > h2, .section-title, .digest header, .digest h2, .digest footer {
   text-shadow: 0 1px 8px rgba(0, 0, 0, .45);

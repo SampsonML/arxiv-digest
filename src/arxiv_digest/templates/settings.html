@@ -23,7 +23,11 @@
     <div class="categories">
     {% for group in groups %}
       <details{% if group.count %} open{% endif %}>
-        <summary>{{ group.name }}{% if group.count %} <span class="count">({{ group.count }} selected)</span>{% endif %}</summary>
+        <summary>{{ group.name }} <span class="count">{% if group.count %}({{ group.count }} selected){% endif %}</span></summary>
+        {% set total = group["items"]|length %}
+        {% if total > 1 %}
+        <label class="select-all"><input type="checkbox" class="select-all-box"{% if group.count == total %} checked{% endif %}> Select all <span class="muted">({{ total }} {{ group.name }} categories)</span></label>
+        {% endif %}
         <div class="checks">
         {% for item in group["items"] %}
           <label title="{{ item.name }}"><input type="checkbox" name="category" value="{{ item.code }}"{% if item.checked %} checked{% endif %}> <code>{{ item.code }}</code> {{ item.name }}</label>
@@ -59,4 +63,30 @@
     <p class="muted small">{% if exists %}Saved to{% else %}Will be created at{% endif %} <code>{{ config_path }}</code>. Comments in the file are kept, except inside interests. Other settings (e.g. the local model) are edited in the file.</p>
   </form>
 </main>
+{% endblock %}
+{% block scripts %}
+<script>
+  // "Select all" in each category group: ticks or clears the whole group, shows a
+  // half-ticked box when only some are selected, and keeps the count up to date.
+  // It has no name, so only the category boxes themselves are submitted.
+  document.querySelectorAll(".categories details").forEach((group) => {
+    const all = group.querySelector(".select-all-box");
+    const boxes = [...group.querySelectorAll('input[name="category"]')];
+    const count = group.querySelector(".count");
+    const update = () => {
+      const n = boxes.filter((box) => box.checked).length;
+      if (all) {
+        all.checked = n === boxes.length;
+        all.indeterminate = n > 0 && n < boxes.length;
+      }
+      if (count) count.textContent = n ? `(${n} selected)` : "";
+    };
+    if (all) all.addEventListener("change", () => {
+      boxes.forEach((box) => (box.checked = all.checked));
+      update();
+    });
+    boxes.forEach((box) => box.addEventListener("change", update));
+    update();
+  });
+</script>
 {% endblock %}

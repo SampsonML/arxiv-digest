@@ -5,13 +5,14 @@ import pytest
 from conftest import make_paper
 from starlette.testclient import TestClient
 
+from arxiv_digest import categories as cats
 from arxiv_digest import config as cfg
 from arxiv_digest import paths
 from arxiv_digest.claude_cli import ClaudeStatus
 from arxiv_digest.digest import Digest, Entry
 from arxiv_digest.pipeline import RunResult
 from arxiv_digest.store import Store
-from arxiv_digest.webapp import ClaudeAccount, create_app, sign_in_links
+from arxiv_digest.webapp import ClaudeAccount, _category_groups, create_app, sign_in_links
 
 TOKEN = "test-token"
 
@@ -165,6 +166,21 @@ def test_settings_page_shows_current_settings(config_path):
     assert "Deep reads use sonnet" in page
 
 
+def test_category_groups_have_select_all(config_path):
+    client, _ = _client(config_path)
+    page = client.get("/settings").text
+    assert page.count('class="select-all-box"') == len(_category_groups(set()))
+    assert '<input type="checkbox" class="select-all-box">' in page  # astro-ph: 1 of 6
+    assert 'name="select' not in page  # never submitted with the form
+
+    # A fully selected group starts ticked.
+    all_astro = [c for c in cats.CATEGORIES if c.startswith("astro-ph.")]
+    response = client.post("/settings", data=_form(category=all_astro), follow_redirects=False)
+    assert response.status_code == 303
+    page = client.get("/settings").text
+    assert '<input type="checkbox" class="select-all-box" checked>' in page
+
+
 def _form(**overrides):
     data = {
         "csrf": TOKEN,
@@ -176,7 +192,6 @@ def _form(**overrides):
         "interest-1-name": "Lensing",
         "interest-1-keywords": "shear",
         "interest-1-exclude": "quantum",
-        "output_dir": "~/arxiv-digest",
         "max_papers": "12",
         "top_picks": "2",
         "use_claude": "on",
