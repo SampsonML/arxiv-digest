@@ -7,9 +7,31 @@
   <a href="/">All digests</a>
   {% if newer %}<a href="/digest/{{ newer }}">Newer →</a>{% else %}<span></span>{% endif %}
 </div>
+{% if digest.entries %}
+<div class="digest-actions">
+  <details class="save-menu">
+    <summary class="save-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/></svg>Save digest<span class="caret" aria-hidden="true">▾</span></summary>
+    <div class="save-options">
+      <a href="/digest/{{ row.id }}/save/html" download>As HTML<small>A web page with working links and math; opens in any browser</small></a>
+      <a href="/digest/{{ row.id }}/save/markdown" download>As Markdown<small>Plain text for notes apps like Obsidian, or GitHub</small></a>
+    </div>
+  </details>
+</div>
+{% endif %}
 {{ body }}
 {% if row.html_path or row.markdown_path %}
 <p class="files-note">Saved as {% if row.markdown_path %}<code>{{ row.markdown_path }}</code>{% endif %}{% if row.markdown_path and row.html_path %} and {% endif %}{% if row.html_path %}<code>{{ row.html_path }}</code>{% endif %}</p>
 {% endif %}
 {% endblock %}
-{% block scripts %}{{ katex_scripts }}{% endblock %}
+{% block scripts %}{{ katex_scripts }}
+<script>
+  // Close the Save menu after choosing a format, or when clicking elsewhere.
+  (() => {
+    const menu = document.querySelector(".save-menu");
+    if (!menu) return;
+    menu.querySelectorAll(".save-options a").forEach((a) =>
+      a.addEventListener("click", () => setTimeout(() => (menu.open = false), 150)));
+    document.addEventListener("click", (e) => { if (!menu.contains(e.target)) menu.open = false; });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.open = false; });
+  })();
+</script>{% endblock %}

@@ -67,7 +67,7 @@ class RunResult:
     digest: Digest | None = None
     markdown: str | None = None
     html: str | None = None
-    path: Path | None = None  # the Markdown file
+    path: Path | None = None  # the Markdown file, only after save_files()
     html_path: Path | None = None
     digest_id: int | None = None
     notes: list[str] = field(default_factory=list)
@@ -257,11 +257,9 @@ def run_digest(
     result.html = standalone_page(result.digest)
 
     if not options.dry_run:
-        config.output_dir.mkdir(parents=True, exist_ok=True)
-        result.path, result.html_path = digest_paths(config.output_dir, result.digest.generated)
-        result.path.write_text(result.markdown, encoding="utf-8")
-        result.html_path.write_text(result.html, encoding="utf-8")
-        result.digest_id = store.save_digest(result.digest, result.path, result.html_path)
+        # Digests are kept in the database; files are written only on request
+        # (the app's Save button, or `arxiv-digest run --save`).
+        result.digest_id = store.save_digest(result.digest, None, None)
         store.mark_seen(new)
         assert run_id is not None
         store.finish_run(
@@ -269,10 +267,21 @@ def run_digest(
             fetched=result.fetched,
             new=len(new),
             picked=len(result.picks),
-            digest_path=result.path,
+            digest_path=None,
         )
         store.prune()
     return result
+
+
+def save_files(result: RunResult, output_dir: Path) -> tuple[Path, Path]:
+    """Write the digest as Markdown and HTML files in `output_dir` (`run --save`)."""
+    assert result.digest is not None and result.markdown is not None and result.html is not None
+    output_dir.mkdir(parents=True, exist_ok=True)
+    md, html = digest_paths(output_dir, result.digest.generated)
+    md.write_text(result.markdown, encoding="utf-8")
+    html.write_text(result.html, encoding="utf-8")
+    result.path, result.html_path = md, html
+    return md, html
 
 
 def latest_shortlist(

@@ -101,6 +101,7 @@ def open_app(
     port: int = DEFAULT_PORT,
     config: Path | None = None,
     *,
+    page: str = "",
     browser: bool = True,
     idle_exit: float = IDLE_EXIT,
     wait: float = 20.0,
@@ -109,8 +110,11 @@ def open_app(
     open_url: Callable[[str], object] = webbrowser.open,
     sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[str, bool]:
-    """Make sure the app is running, then open it. Returns (url, started_now)."""
-    url = app_url(port)
+    """Make sure the app is running, then open it (at `page`, e.g. "digest/3").
+
+    Returns (url, started_now).
+    """
+    url = app_url(port) + page.lstrip("/")
     state = status(port)
     if state == "other":
         raise LauncherError(f"Port {port} is used by another program; try --port {port + 1}.")

@@ -38,11 +38,23 @@ from . import __version__, launcher, paths
 from . import categories as cats
 from . import config as cfg
 from .claude_cli import SIGN_IN_HINT, ClaudeCLI, ClaudeStatus
-from .html_render import KATEX_HEAD, KATEX_SCRIPTS, digest_body, interest_colors, stylesheet
+from .html_render import (
+    KATEX_HEAD,
+    KATEX_SCRIPTS,
+    digest_body,
+    interest_colors,
+    standalone_page,
+    stylesheet,
+)
 from .pipeline import RunOptions, RunResult, run_with_config
+from .render import render_markdown
 from .store import Store
 
 MODEL_CHOICES = ["sonnet", "haiku", "opus"]
+SAVE_FORMATS = {  # the digest page's Save menu: kind -> (file suffix, media type)
+    "html": ("html", "text/html; charset=utf-8"),
+    "markdown": ("md", "text/markdown; charset=utf-8"),
+}
 RunFunction = Callable[[cfg.Config, RunOptions, Callable[[str], None]], RunResult]
 
 
@@ -354,7 +366,6 @@ class SettingsForm:
                 categories=[],
                 interests=[],
                 values={
-                    "output_dir": paths.default_output_dir(),
                     "max_papers": 15,
                     "top_picks": 3,
                     "use_claude": True,
@@ -366,7 +377,6 @@ class SettingsForm:
             categories=list(conf.categories),
             interests=list(conf.interests),
             values={
-                "output_dir": paths.display(conf.output_dir),
                 "max_papers": conf.max_papers,
                 "top_picks": conf.top_picks,
                 "use_claude": conf.use_claude,
@@ -393,7 +403,6 @@ class SettingsForm:
             categories=categories,
             interests=interests,
             values={
-                "output_dir": str(form.get("output_dir", "")).strip() or paths.default_output_dir(),
                 "max_papers": number("max_papers", 15),
                 "top_picks": number("top_picks", 3),
                 "use_claude": form.get("use_claude") == "on",
@@ -683,6 +692,28 @@ def create_app(
             katex_scripts=Markup(KATEX_SCRIPTS),
         )
 
+    async def save_digest(request: Request) -> Response:
+        """The Save button: the digest as a downloaded HTML or Markdown file."""
+        kind = request.path_params["kind"]
+        if kind not in SAVE_FORMATS:
+            return Response("Unknown format", status_code=404)
+        store = Store(paths.database_path())
+        try:
+            found = store.get_digest(int(request.path_params["digest_id"]))
+        finally:
+            store.close()
+        if found is None:
+            return Response("There is no digest with that number.", status_code=404)
+        digest = found[0]
+        suffix, media_type = SAVE_FORMATS[kind]
+        content = standalone_page(digest) if kind == "html" else render_markdown(digest)
+        filename = f"arxiv-digest-{digest.generated:%Y-%m-%d}.{suffix}"
+        return Response(
+            content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     async def start_run(request: Request) -> Response:
         if not await check_csrf(request):
             return Response("Invalid or missing form token; reload the page.", status_code=403)
@@ -855,6 +886,7 @@ def create_app(
             Route("/interests", save_interests, methods=["POST"]),
             Route("/shortcut", shortcut, methods=["POST"]),
             Route("/digest/{digest_id:int}", show_digest),
+            Route("/digest/{digest_id:int}/save/{kind}", save_digest),
             Route("/run", start_run, methods=["POST"]),
             Route("/run", run_page, methods=["GET"]),
             Route("/run/status", run_status),

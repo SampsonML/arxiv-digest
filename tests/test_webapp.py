@@ -124,6 +124,27 @@ def test_digest_page(config_path):
     assert client.get("/digest/999").status_code == 404
 
 
+def test_digest_can_be_saved_as_html_or_markdown(config_path):
+    digest_id = _save_digest()
+    client, _ = _client(config_path)
+    page = client.get(f"/digest/{digest_id}").text
+    assert f'href="/digest/{digest_id}/save/html" download' in page
+    assert f'href="/digest/{digest_id}/save/markdown" download' in page
+
+    html = client.get(f"/digest/{digest_id}/save/html")
+    assert html.status_code == 200 and html.headers["content-type"].startswith("text/html")
+    assert html.headers["content-disposition"].endswith('filename="arxiv-digest-2026-11-03.html"')
+    assert html.text.startswith("<!doctype html>") and "arxiv.org/abs/2611.00001" in html.text
+
+    md = client.get(f"/digest/{digest_id}/save/markdown")
+    assert md.headers["content-type"].startswith("text/markdown")
+    assert md.headers["content-disposition"] == 'attachment; filename="arxiv-digest-2026-11-03.md"'
+    assert "[arXiv:2611.00001](https://arxiv.org/abs/2611.00001)" in md.text
+
+    assert client.get(f"/digest/{digest_id}/save/pdf").status_code == 404
+    assert client.get("/digest/999/save/html").status_code == 404
+
+
 def test_other_hosts_are_rejected(config_path):
     client, _ = _client(config_path, base_url="http://evil.example")
     assert client.get("/").status_code == 400

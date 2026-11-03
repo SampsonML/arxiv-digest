@@ -322,7 +322,8 @@ def create_server(
             return "No new papers since the last digest. (Use include_seen=true to redo the latest announcement.)"
         notes = "".join(f"\nNote: {n}" for n in result.notes)
         return (
-            f"Digest #{result.digest_id} written to {result.path} and {result.html_path}."
+            f"Digest #{result.digest_id} is ready in the arxiv-digest app, where its Save"
+            " button downloads it as HTML or Markdown."
             f"{notes}\n\n" + render_markdown(result.digest)
         )
 

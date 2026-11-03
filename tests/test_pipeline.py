@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from conftest import NOW, FakeClient, FakeEmbedder, make_paper
 
-from arxiv_digest.pipeline import RunOptions, digest_paths, run_digest
+from arxiv_digest.pipeline import RunOptions, digest_paths, run_digest, save_files
 from arxiv_digest.store import Store
 
 
@@ -18,7 +18,7 @@ def _papers():
     ]
 
 
-def test_first_run_writes_digest_and_remembers_papers(tmp_path, make_config):
+def test_first_run_keeps_the_digest_and_remembers_papers(tmp_path, make_config):
     config = make_config()
     store = Store(tmp_path / "db.sqlite3")
     client = FakeClient(_papers())
@@ -36,8 +36,9 @@ def test_first_run_writes_digest_and_remembers_papers(tmp_path, make_config):
     picked = {p.candidate.paper.id for p in result.picks}
     assert {"2611.00001", "2611.00002", "2611.00003"} <= picked
     assert "2611.00004" not in picked
-    assert result.path is not None and result.path.exists()
-    text = result.path.read_text()
+    assert result.path is None and not config.output_dir.exists()  # no files unless asked
+    assert result.digest_id is not None
+    text = result.markdown
     assert "## ⭐ Top picks" in text
     assert "[arXiv:2611.00003](https://arxiv.org/abs/2611.00003)" in text
     assert "**Vera Rubin**" in text  # followed author highlighted
@@ -89,7 +90,7 @@ def test_include_seen_and_embedding_cache(tmp_path, make_config):
     )
     assert len(result.new_papers) == 4
     assert embedder.passage_calls == 0  # vectors came from the cache
-    assert result.path.name.endswith("-2.md")  # same day, so a second file
+    assert len(store.list_digests()) == 2
 
 
 def test_without_model_ranks_by_keywords_and_authors(tmp_path, make_config):
@@ -112,21 +113,24 @@ def test_digest_paths_number_repeat_days_and_keep_md_html_paired(tmp_path):
     assert (md.name, html.name) == ("2026-11-03-2.md", "2026-11-03-2.html")
 
 
-def test_run_writes_html_and_saves_the_digest(tmp_path, make_config):
+def test_run_keeps_the_digest_and_saves_files_only_on_request(tmp_path, make_config):
     config = make_config()
     store = Store(tmp_path / "db.sqlite3")
     result = run_digest(
         config, store, FakeClient(_papers()), FakeEmbedder(), log=lambda m: None, now=NOW
     )
-    assert result.html_path.exists() and result.html_path.suffix == ".html"
-    assert result.html_path.stem == result.path.stem
-    html = result.html_path.read_text()
-    assert html.startswith("<!doctype html>")
-    assert 'href="https://arxiv.org/abs/2611.00003"' in html
     saved, row = store.get_digest(result.digest_id)
-    assert row["html_path"] == str(result.html_path)
+    assert row["html_path"] is None and row["markdown_path"] is None
     assert [e.paper.id for e in saved.entries] == [p.candidate.paper.id for p in result.picks]
     assert store.list_digests()[0]["id"] == result.digest_id
+
+    md, html = save_files(result, config.output_dir)  # `arxiv-digest run --save`
+    assert (md.parent, md.stem, html.suffix) == (config.output_dir, html.stem, ".html")
+    assert "## ⭐ Top picks" in md.read_text()
+    page = html.read_text()
+    assert page.startswith("<!doctype html>")
+    assert 'href="https://arxiv.org/abs/2611.00003"' in page
+    assert save_files(result, config.output_dir)[0].name.endswith("-2.md")  # same day
 
 
 class FakeRanker:

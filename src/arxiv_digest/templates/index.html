@@ -88,14 +88,13 @@
   {% if digests %}
   <div class="table-card">
   <table class="list">
-    <thead><tr><th>Date</th><th>Picked</th><th>New papers</th><th>File</th></tr></thead>
+    <thead><tr><th>Date</th><th>Picked</th><th>New papers</th></tr></thead>
     <tbody>
     {% for d in digests %}
       <tr>
         <td><a href="/digest/{{ d.id }}">{{ d.when.strftime("%a") }} {{ d.when.day }} {{ d.when.strftime("%b %Y, %H:%M") }}</a></td>
         <td class="num">{{ d.picked }}</td>
         <td class="num">{{ d.new }}</td>
-        <td class="files">{% if d.html_path %}<code title="{{ d.html_path }}">{{ d.html_path.rsplit("/", 1)[-1] }}</code>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

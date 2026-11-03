@@ -41,9 +41,6 @@
       <label>Most papers per digest <input type="number" name="max_papers" min="1" max="200" value="{{ form.values.max_papers }}"></label>
       <label>Top picks <input type="number" name="top_picks" min="0" max="20" value="{{ form.values.top_picks }}"></label>
     </div>
-    <label>Folder for the daily Markdown and HTML files
-      <input name="output_dir" value="{{ form.values.output_dir }}">
-    </label>
 
     <h2>Claude</h2>
     {% with nested = True %}{% include "_claude_status.html" %}{% endwith %}

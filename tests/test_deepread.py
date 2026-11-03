@@ -6,7 +6,7 @@ from conftest import make_paper
 
 from arxiv_digest.claude_cli import ClaudeCLI
 from arxiv_digest.config import Config, Interest
-from arxiv_digest.deepread import DeepReader, build_prompt, cache_key, parse_read
+from arxiv_digest.deepread import MAX_PART, DeepReader, build_prompt, cache_key, parse_read
 from arxiv_digest.fulltext import FullText, FullTextError
 from arxiv_digest.models import DeepRead
 from arxiv_digest.rank import Pick
@@ -80,14 +80,14 @@ def test_cache_key_depends_on_model_and_interest():
 
 def test_parse_read_cleans_and_validates():
     read = parse_read(
-        {"method": "  Trains\n an emulator. ", "results": "Good.", "why_it_matters": "x" * 900},
+        {"method": "  Trains\n an emulator. ", "results": "Good.", "why_it_matters": "x" * 2000},
         TEXT,
     )
     assert read.method == "Trains an emulator." and read.source == "arXiv HTML"
-    assert len(read.why) <= 600 and read.why.endswith("…")
-    sentences = "One short sentence. " * 50
+    assert len(read.why) <= MAX_PART and read.why.endswith("…")
+    sentences = "One short sentence. " * 100
     cut = parse_read({"method": sentences, "results": "r", "why_it_matters": "w"}, TEXT)
-    assert cut.method.endswith("sentence.") and len(cut.method) <= 600  # whole sentences
+    assert cut.method.endswith("sentence.") and len(cut.method) <= MAX_PART
 
 
 def test_deep_reader_reads_in_parallel_caches_and_reports_failures(tmp_path):

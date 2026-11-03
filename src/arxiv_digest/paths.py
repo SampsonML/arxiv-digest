@@ -11,11 +11,12 @@ Overrides: ARXIV_DIGEST_CONFIG points at a different config file, and
 ARXIV_DIGEST_HOME puts the data and cache directories under one folder (useful
 for testing or for keeping several independent digests).
 
-The digests themselves go wherever `output_dir` in the config says. Its default
-is the `digests/` folder of the project when arxiv-digest runs from a clone of
-the repository (`uv run`, or an editable install), so code and digests live
-together; an installed copy (pip, uv tool, uvx) has no project folder and uses
-~/arxiv-digest instead.
+Digests are kept in the database; files are written only when asked for (the
+app's Save button downloads one, and `arxiv-digest run --save` writes Markdown
+and HTML to `output_dir`). The default `output_dir` is the `digests/` folder of
+the project when arxiv-digest runs from a clone of the repository (`uv run`, or
+an editable install); an installed copy (pip, uv tool, uvx) has no project
+folder and uses ~/arxiv-digest instead.
 """
 
 from __future__ import annotations

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import webbrowser
 from pathlib import Path
 from typing import Annotated
@@ -17,7 +18,7 @@ from . import categories as cats
 from . import config as cfg
 from .arxiv_api import ArxivError
 from .claude_cli import ClaudeCLI
-from .pipeline import RunOptions, run_with_config
+from .pipeline import RunOptions, run_with_config, save_files
 from .store import Store
 
 app = typer.Typer(
@@ -139,13 +140,10 @@ def init(
         "Let's set up your arXiv digest. You can change everything later in the config file.\n"
     )
     categories = _ask_categories()
-    output_dir = typer.prompt(
-        "Folder for the daily Markdown files", default=paths.default_output_dir()
-    )
     interests = [_ask_interest()]
     while typer.confirm("Add another interest?", default=False):
         interests.append(_ask_interest())
-    text = cfg.render_template(categories, output_dir, interests)
+    text = cfg.render_template(categories, paths.default_output_dir(), interests)
     cfg.parse(text, path)  # sanity check before writing
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -174,7 +172,7 @@ def run(
     dry_run: Annotated[
         bool,
         typer.Option(
-            "--dry-run", help="Print the digest instead of saving it, and remember nothing."
+            "--dry-run", help="Print the digest instead of keeping it, and remember nothing."
         ),
     ] = False,
     no_model: Annotated[
@@ -192,13 +190,19 @@ def run(
         typer.Option("--no-deep-read", help="Skip Claude's full-text read of the top picks."),
     ] = False,
     no_open: Annotated[
-        bool, typer.Option("--no-open", help="Don't open the HTML digest in the browser.")
+        bool, typer.Option("--no-open", help="Don't open the digest in the web app.")
     ] = False,
     show: Annotated[
         bool, typer.Option("--print", help="Also print the digest to the terminal.")
     ] = False,
+    save: Annotated[
+        bool,
+        typer.Option(
+            "--save", help="Also save the digest as Markdown and HTML files in output_dir."
+        ),
+    ] = False,
 ) -> None:
-    """Fetch new papers, rank them, write today's digest (Markdown and HTML) and open it."""
+    """Fetch new papers, rank them, and open today's digest in the web app."""
     conf = _load(config)
     options = RunOptions(
         days=days,
@@ -225,14 +229,24 @@ def run(
         f"{len(result.new_papers)} new papers · {len(result.shortlisted)} shortlisted ·"
         f" {len(result.picks)} picked"
     )
-    if result.path:
-        err.print(f"[green]{summary}[/green]")
-        err.print(f"  Markdown: {escape(str(result.path))}")
-        err.print(f"  HTML:     {escape(str(result.html_path))}")
-        if result.html_path and not no_open:
-            webbrowser.open(result.html_path.as_uri())
-    else:
-        err.print(f"[green]{summary}[/green] (dry run: nothing saved)")
+    if dry_run:
+        err.print(f"[green]{summary}[/green] (dry run: nothing kept)")
+        return
+    err.print(f"[green]{summary}[/green] · digest #{result.digest_id}")
+    if save:
+        md, html = save_files(result, conf.output_dir)
+        err.print(f"  Markdown: {escape(str(md))}")
+        err.print(f"  HTML:     {escape(str(html))}")
+    if not no_open:
+        from . import launcher
+
+        explicit = config.expanduser().resolve() if config else None
+        try:
+            url, _ = launcher.open_app(config=explicit, page=f"digest/{result.digest_id}")
+        except launcher.LauncherError as exc:
+            err.print(f"[yellow]Couldn't open the app:[/yellow] {escape(str(exc))}")
+        else:
+            err.print(f"  Opened {url} (save it as HTML or Markdown from there)")
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +441,86 @@ def shortcut_remove() -> None:
         out.print("No launcher entry to remove.")
 
 
+@app.command()
+def setup(
+    config: ConfigOption = None,
+    port: Annotated[int, typer.Option(help="Port on 127.0.0.1 to serve the app on.")] = 8765,
+    no_open: Annotated[
+        bool, typer.Option("--no-open", help="Don't open the app at the end.")
+    ] = False,
+) -> None:
+    """Add arxiv-digest to your applications and open it (the installers run this)."""
+    from . import launcher
+
+    explicit = config.expanduser().resolve() if config else None
+    if explicit is None and os.environ.get("ARXIV_DIGEST_CONFIG"):
+        explicit = paths.config_path().resolve()
+    try:
+        launcher.install_shortcut(explicit)
+    except (launcher.LauncherError, OSError) as exc:
+        _fail(str(exc))
+    out.print(
+        f"[green]Added arxiv-digest to {launcher.shortcut_place()}.[/green]"
+        " Open it from there like any other app."
+    )
+
+    conf: cfg.Config | None = None
+    path = _config_path(config)
+    if path.exists():
+        try:
+            conf = cfg.load(path)
+        except cfg.ConfigError as exc:
+            out.print(f"[yellow]Your config has a problem:[/yellow] {escape(str(exc))}")
+            out.print("Fix it in the app's Settings.")
+    else:
+        out.print("When it opens, choose your arXiv categories and interests.")
+
+    if conf is None or conf.use_claude:
+        claude = ClaudeCLI(conf.claude_command if conf else "claude").status()
+        if not claude.installed:
+            out.print(
+                "[yellow]Claude Code isn't installed.[/yellow] arxiv-digest still works,"
+                " choosing papers on this computer only. For Claude's picks, reasons and"
+                " deep reads, install it from https://claude.com/claude-code"
+            )
+        elif claude.ready:
+            out.print(f"[green]{escape(claude.describe())}.[/green]")
+        elif claude.ready is None:
+            out.print(f"{escape(claude.describe())}.")
+        else:
+            out.print(
+                f"[yellow]{escape(claude.describe())}.[/yellow]"
+                " Use the Log in button in the app, or run `claude auth login`."
+            )
+
+    if launcher.server_status(port) == "ours":
+        out.print(
+            "[yellow]arxiv-digest is already running[/yellow] with the code it started with."
+            " To use this version, press Quit in the app and open it again."
+        )
+    project = paths.source_checkout()
+    if project is not None:
+        installer = (
+            "powershell -ExecutionPolicy Bypass -File install.ps1"
+            if sys.platform == "win32"
+            else "./install.sh"
+        )
+        folder = paths.display(project)
+        if " " in folder:
+            folder = f'"{folder}"'
+        out.print(
+            f"To update later: [bold]cd {escape(folder)}[/bold],"
+            f" then [bold]git pull[/bold] and [bold]{installer}[/bold]"
+        )
+
+    if not no_open:
+        try:
+            url, _ = launcher.open_app(port, explicit)
+        except launcher.LauncherError as exc:
+            _fail(str(exc))
+        out.print(f"Opened {url}")
+
+
 # ---------------------------------------------------------------------------
 # interests, status
 
@@ -460,7 +554,10 @@ def status(config: ConfigOption = None) -> None:
     if path.exists():
         try:
             conf = cfg.load(path)
-            out.print(f"[bold]Digests[/bold]    {escape(str(conf.output_dir))}")
+            out.print(
+                f"[bold]Files[/bold]      {escape(str(conf.output_dir))}"
+                " (only with `run --save`; the app keeps every digest)"
+            )
             out.print(f"[bold]Categories[/bold] {', '.join(conf.categories)}")
             out.print(
                 f"[bold]Interests[/bold]  {escape(', '.join(i.name for i in conf.interests))}"

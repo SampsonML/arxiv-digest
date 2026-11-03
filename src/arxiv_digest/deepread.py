@@ -1,8 +1,9 @@
 """Deep read: Claude reads the full text of the top picks and summarises them.
 
 For each top pick, the full text is fetched (fulltext.py) and Claude writes
-three short parts: what the authors did, what they found (with key numbers),
-and why it matters for the interest the paper is filed under. Reads run in
+three parts, at least five sentences in all: what the authors did, what they
+found (with key numbers), and why it matters for the interest the paper is
+filed under. Reads run in
 parallel; each is cached by paper, model and interest, so re-running a digest
 doesn't read the same paper twice. A failed read just leaves that paper
 without one, with a note in the digest.
@@ -22,23 +23,24 @@ from .fulltext import FullText, FullTextError
 from .models import DeepRead
 from .rank import Pick
 
-PROMPT_VERSION = 2  # bump when the prompt changes, so old cached reads are redone
-MAX_PART = 600  # characters per summary part (a safety cap; the prompt asks for less)
+PROMPT_VERSION = 3  # bump when the prompt changes, so old cached reads are redone
+MAX_PART = 1200  # characters per summary part (a safety cap; the prompt asks for less)
 _SPACE = re.compile(r"\s+")
 
 SYSTEM_PROMPT = """\
 You have read a new research paper in full for a researcher, and you now \
-summarise it for them in three short parts:
+summarise it for them in three parts:
 - method: what the authors did: the approach, data, models or experiments. \
-At most 45 words.
-- results: what they found, with the two or three most important numbers the \
-paper reports (errors, speed-ups, constraints, sample sizes). At most 45 words. \
-Never invent numbers; if the paper gives none, say what was shown.
+2 or 3 sentences.
+- results: what they found, with the most important numbers the paper reports \
+(errors, speed-ups, constraints, sample sizes). 2 or 3 sentences. Never invent \
+numbers; if the paper gives none, say what was shown.
 - why_it_matters: why this matters for the researcher's interest (given \
-below), plus the single most important caveat. At most 35 words.
+below), plus the most important caveat or limitation. 1 or 2 sentences.
 
-Keep to these limits: the summary is skimmed in a daily digest, and the \
-researcher can open the paper for details.
+Together the three parts must have at least five full sentences, and at most \
+eight. Keep each sentence under about 30 words: the summary is read in a daily \
+digest, and the researcher can open the paper for more.
 
 Write plain, concrete sentences with verbs, and address the reader as "you" \
 where needed. Don't repeat the title, don't start with "This paper", and don't \

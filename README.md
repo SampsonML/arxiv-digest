@@ -1,52 +1,93 @@
-# arxiv-digest
+<p align="center">
+  <img src="src/arxiv_digest/assets/icons/arxiv-digest.svg" alt="The arxiv-digest icon, a test tube" width="128">
+</p>
 
-A daily digest of the new arXiv papers that match **your** research interests, written as a Markdown file you can read in any editor, on GitHub or in Obsidian.
+<h1 align="center">arxiv-digest</h1>
 
-You describe what you care about: keywords, a sentence or two about a research idea, or authors you follow. `arxiv-digest run` then:
-1. fetches the papers newly announced in your arXiv categories
-2. ranks them against your interests on your own computer
-3. writes the best ones, with links, abstracts and Claude's reasons, to `digests/2026-11-03.md` and `digests/2026-11-03.html`, and opens the HTML in your browser
-
-Or run `arxiv-digest app` for the same thing in a browser window: browse past digests, run a new one, and edit your interests in forms.
-
-> **Status: v0.4.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Every digest is written as Markdown and as HTML. There's a local web app, and an MCP server so Claude Code and Claude Desktop can use your digests directly.
+<p align="center">
+  A daily digest of the new arXiv papers that match <b>your</b> research interests,<br>
+  shortlisted on your own computer, then chosen and explained by Claude.
+</p>
 
 ## Install
 
-You need Python 3.11–3.14. For Claude's picks, explanations and deep reads, you also need [Claude Code](https://claude.com/claude-code) signed in with your Claude account. arxiv-digest isn't on PyPI yet, so install it from a clone of this repository with any one of:
+Open a terminal and run the three lines for your system.
+
+**macOS and Linux**
 
 ```bash
-uv tool install .            # with uv (recommended: it picks a supported Python for you)
-pipx install .               # with pipx
-python3 -m pip install .     # with plain pip, ideally in a virtual environment
+git clone https://github.com/SampsonML/arxiv-digest.git
+cd arxiv-digest
+./install.sh
 ```
 
-uv isn't required. It's just the easiest option. If your `python3` is 3.15 (or older than 3.11), pip and pipx will refuse to install, because the local model's runtime (onnxruntime) has no 3.15 build yet. In that case either:
-- use uv, which fetches a supported Python automatically, or
-- point pipx at a supported one: `pipx install --python python3.13 .`
+**Windows** (PowerShell)
 
-Contributors use uv to run the tests (see [Development](#development)).
+```powershell
+git clone https://github.com/SampsonML/arxiv-digest.git
+cd arxiv-digest
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
 
-## Quick start
+**arxiv-digest** is now in your applications, with a test-tube icon: Launchpad and Spotlight on macOS, the Start menu on Windows, and your app launcher on Linux. The installer also opens it in your browser. The first time, choose your arXiv categories and describe your interests, then press **Run today's digest**.
+
+What the installer does:
+1. If you don't have [uv](https://docs.astral.sh/uv/), it asks to install it. uv sets up a supported Python (3.11–3.14) for arxiv-digest without changing your system's Python.
+2. It installs arxiv-digest and its packages into a `.venv` folder inside `arxiv-digest`, at the exact versions in `uv.lock`.
+3. It adds the app to your applications, checks whether Claude Code is signed in, and opens the app.
+
+Good to know:
+- **Keep the folder.** The app runs from it. If you move the folder, run the installer again.
+- **Claude.** For Claude's picks, reasons and deep reads, you need [Claude Code](https://claude.com/claude-code) signed in with your Claude account; API keys are never used. The app shows whether you're signed in and has a **Log in** button. Without Claude Code, arxiv-digest still works, choosing papers on your computer only.
+- **Runs on** macOS 14 or later on Apple silicon, Linux (x86-64 or ARM) and Windows 10/11. Intel Macs aren't supported, because the local model's runtime (onnxruntime) is no longer built for them.
+- **No git?** On GitHub, use **Code → Download ZIP**, unzip it, and run the installer inside the folder. On macOS, typing `git` in a terminal offers to install it.
+
+**Update:** press **Quit** in the app. Then, in the `arxiv-digest` folder, run `git pull` followed by the installer again (`./install.sh`, or the PowerShell line on Windows).
+
+**Uninstall:** in the folder, run `uv run arxiv-digest shortcut remove` (and `uv run arxiv-digest mcp uninstall` if you added the MCP server), then delete the folder. Your settings and history are in `~/.config/arxiv-digest` and `~/.local/share/arxiv-digest`; delete those too to remove everything.
+
+## What it does
+
+You describe what you care about: keywords, a sentence or two about a research idea, or authors you follow. Each time you run a digest, arxiv-digest:
+1. fetches the papers newly announced in your arXiv categories
+2. ranks them against your interests on your own computer
+3. shows the best ones in the app, with links, abstracts and Claude's reasons
+
+Digests stay in the app, where you can browse every one you've made. Nothing is written to your disk unless you ask: to keep a digest as a file, press **Save digest** at the top of it and choose **As HTML** (a web page with working links and rendered math) or **As Markdown** (for any editor, GitHub or Obsidian). Your browser downloads it.
+
+> **Status: v0.5.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Any digest can be saved as Markdown or HTML. There's a local web app, and an MCP server so Claude Code and Claude Desktop can use your digests directly.
+
+## From the terminal
+
+Everything the app does also works from the command line. The installer doesn't put `arxiv-digest` on your PATH, so in the `arxiv-digest` folder, run commands with `uv run`:
 
 ```bash
-arxiv-digest init      # a few questions: categories, output folder, interests
-arxiv-digest run       # fetch, rank, write today's digest and open it
-arxiv-digest app       # or do all of this in the web app
+uv run arxiv-digest run       # fetch, rank, and open today's digest in the app
+uv run arxiv-digest status    # file locations, Claude's sign-in and the last run
 ```
+
+To type just `arxiv-digest` from anywhere on macOS or Linux, link it into `~/.local/bin` (uv's installer puts that folder on your PATH):
+
+```bash
+ln -s "$PWD/.venv/bin/arxiv-digest" ~/.local/bin/arxiv-digest
+```
+
+The rest of this README uses the short form.
 
 The first run downloads a small language model once (~90 MB) and covers arXiv's latest announcement. After that, each run picks up everything announced since the previous run (up to 7 days back), and a paper never appears in two digests.
 
-arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with none on Friday or Saturday nights. Running `arxiv-digest run` each morning is enough; running it more often just finds nothing new.
+arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with none on Friday or Saturday nights. Running a digest each morning is enough; running it more often just finds nothing new.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `arxiv-digest init` | Create the config by answering a few questions |
-| `arxiv-digest run` | Write a digest (Markdown and HTML) of the papers that are new since the last run, and open the HTML |
-| `arxiv-digest run --no-open` | The same, without opening the browser |
-| `arxiv-digest run --dry-run` | Print the digest instead of saving it, and remember nothing |
+| `arxiv-digest run` | Make a digest of the papers that are new since the last run, and open it in the app |
+| `arxiv-digest run --save` | The same, and also write it as Markdown and HTML files in `output_dir` |
+| `arxiv-digest run --print` | Also print the digest (Markdown) in the terminal |
+| `arxiv-digest run --no-open` | Don't open the app |
+| `arxiv-digest run --dry-run` | Print the digest instead of keeping it, and remember nothing |
 | `arxiv-digest run --days 3` | Cover the last 3 days of submissions (papers already shown are skipped) |
 | `arxiv-digest run --include-seen` | Redo the latest announcement, including papers already shown (useful after editing interests) |
 | `arxiv-digest run --no-claude` | Choose papers on this computer only, without Claude's picks and explanations |
@@ -61,6 +102,7 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest app [--port 8765]` | Run the web app in this terminal and open it in your browser |
 | `arxiv-digest open` | Open the web app, starting it in the background if needed (what the launcher entry runs) |
 | `arxiv-digest shortcut install` / `remove` | Add or remove "arxiv-digest" in your system's app launcher |
+| `arxiv-digest setup` | Add the app to your applications, check Claude, and open the app (what the installers run) |
 
 Every command accepts `--config PATH` to use a different config file.
 
@@ -70,7 +112,6 @@ Every command accepts `--config PATH` to use a different config file.
 
 ```toml
 categories = ["astro-ph.CO", "astro-ph.GA", "cs.LG", "stat.ML"]
-output_dir = "~/Projects/arxiv-digest/digests"   # or e.g. a folder in your Obsidian vault
 max_papers = 15                 # most papers in one digest
 top_picks = 3                   # papers in the Top picks section
 
@@ -99,6 +140,7 @@ Less common settings, with their defaults:
 
 | Setting | Default | Meaning |
 |---|---|---|
+| `output_dir` | the project's `digests/` folder, or `~/arxiv-digest` | Where `arxiv-digest run --save` writes Markdown and HTML files (e.g. a folder in your Obsidian vault) |
 | `shortlist_size` | `40` | How many papers the local model keeps for final ranking |
 | `max_catchup_days` | `7` | The furthest back a run looks after a long break |
 | `min_zscore` | `2.5` | Without Claude, how far above the day's average similarity a paper must be to be picked on meaning alone (2.5 ≈ the closest 1%) |
@@ -128,10 +170,10 @@ Less common settings, with their defaults:
      - When you're not signed in, runs skip Claude with a note saying how to log in.
    - If Claude Code isn't installed, or the call fails, the digest falls back to the local rule (a followed author, a keyword hit, or similarity well above the day's average) and says so at the top.
 
-5. **Deep read.** For the top picks (3 by default), arxiv-digest downloads the full text. It uses arXiv's HTML version where there is one, which keeps the math as LaTeX, and otherwise the PDF's text, leaving out the references. Claude reads each paper and writes three short parts, shown in a "Deep read" panel on the paper's card:
-   - **Method:** what the authors did
-   - **Results:** what they found, with the key numbers
-   - **Why it matters:** why it matters for your interest, with the main caveat
+5. **Deep read.** For the top picks (3 by default), arxiv-digest downloads the full text. It uses arXiv's HTML version where there is one, which keeps the math as LaTeX, and otherwise the PDF's text, leaving out the references. Claude reads each paper and writes three parts, at least five sentences in all, shown in a "Deep read" panel on the paper's card:
+   - **Method:** what the authors did (2–3 sentences)
+   - **Results:** what they found, with the key numbers (2–3 sentences)
+   - **Why it matters:** why it matters for your interest, with the main caveat (1–2 sentences)
 
    Reads run in parallel and took about 20 seconds for three papers in testing. Each read is cached, so re-running a digest doesn't read the same paper twice. Very long papers are cut to about 120,000 characters. If a paper can't be downloaded or read, the digest says so and carries on.
 
@@ -149,17 +191,9 @@ With `--no-claude`, ranking stays entirely on your computer.
 | Config | `~/.config/arxiv-digest/config.toml` | `ARXIV_DIGEST_CONFIG`, `--config` |
 | Database: papers seen, cached vectors, run history | `~/.local/share/arxiv-digest/` | `ARXIV_DIGEST_HOME` |
 | Model cache | `~/.cache/arxiv-digest/models/` | `ARXIV_DIGEST_HOME` |
-| Digests | `output_dir` in the config. `init` suggests the `digests/` folder of this project when run from a clone (git-ignored, so digests are never committed), otherwise `~/arxiv-digest`. | |
+| Digests | In the database. Files only when you save one: **Save digest** downloads it with your browser, and `run --save` writes to `output_dir` (default: the `digests/` folder of this project when run from a clone, which git ignores, otherwise `~/arxiv-digest`) | |
 
 These follow the XDG conventions (`XDG_CONFIG_HOME` etc. are respected) on every platform, macOS included. `ARXIV_DIGEST_HOME` puts the database and model cache under one folder, which is handy for testing.
-
-## Development
-
-```bash
-uv sync
-uv run pytest           # fast and offline: fake arXiv responses and a fake model
-uv run ruff check . && uv run ruff format --check .
-```
 
 ## Use it from Claude (MCP)
 
@@ -191,13 +225,7 @@ The server runs on your computer over stdio. Claude starts it; it opens no netwo
 
 ### Opening it without a terminal
 
-The first time you open the web app, it offers to add itself to your Applications (macOS), Start menu (Windows) or app launcher (Linux) with one click. You can also do it from a terminal:
-
-```bash
-arxiv-digest shortcut install
-```
-
-This adds **arxiv-digest**, with a test-tube icon, to your app launcher:
+The installer adds **arxiv-digest**, with a test-tube icon, to your applications. If you installed it [another way](#other-ways-to-install), run `arxiv-digest setup`, or use the one-click offer the web app shows the first time it opens. (`arxiv-digest shortcut install` adds the entry without opening the app.)
 
 | Platform | Where it goes | Tested |
 |---|---|---|
@@ -209,14 +237,14 @@ Clicking it starts the app in the background, with no terminal window, and opens
 
 A background app stops by itself 10 minutes after you close its last tab, never during a run. You can also stop it any time with **Quit** in the top bar.
 
-The entry runs the same Python environment you ran `shortcut install` from. If you reinstall arxiv-digest somewhere else, run `shortcut install` again. Remove the entry with `arxiv-digest shortcut remove`.
+The entry runs the Python environment it was added from: the `.venv` in the `arxiv-digest` folder, when you used the installer. If you move or reinstall arxiv-digest, run the installer (or `arxiv-digest setup`) again. Remove the entry with `arxiv-digest shortcut remove`.
 
 ### What's in it
 
 `arxiv-digest app` starts a small web server on your computer and opens it in your browser:
 
 - **Start page:** a greeting with your latest digest's numbers (new, shortlisted, picked) and a **Run today's digest** button. Below it, your interests appear as coloured chips: click one to edit it in a side panel, or click **+ Add interest**. **Save** keeps the changes; **Save and re-run latest announcement** also shows today's papers again, chosen for the updated interests.
-- **Digests:** every digest you've made, newest first. Each one opens in the same layout as the HTML file, with older/newer links.
+- **Digests:** every digest you've made, newest first, with older/newer links. **Save digest** at the top of one downloads it as HTML or Markdown.
 - **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away.
 - **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, and set the digest size and Claude model. Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
 
@@ -224,14 +252,29 @@ The entry runs the same Python environment you ran `shortcut install` from. If y
 
 The server only listens on `127.0.0.1`. It rejects requests addressed to any other host name, which blocks DNS-rebinding attacks from other sites open in your browser. Every form also carries a random token, so other websites can't submit changes for you. Stop it with Ctrl+C.
 
-## Roadmap
+## Other ways to install
 
-1. ✅ Core: config, fetching, local ranking, Markdown digest
-2. ✅ Claude ranking through the Claude Code CLI (`claude -p`): picks only relevant papers, up to the cap, with a "why it was chosen" line for each
-3. ✅ HTML digests (same content as the Markdown; math rendered with KaTeX) and the local web app
-4. ✅ Deep read: Claude reads the full text of the top picks and summarises the method and results
-5. ✅ MCP server, so Claude can browse, search and explain your digests
-6. PyPI release and a Claude Code plugin
+The installer is the simplest route, but arxiv-digest is an ordinary Python package that needs Python 3.11–3.14. From a clone of this repository, any one of these also works:
+
+```bash
+uv tool install .            # with uv (puts `arxiv-digest` on your PATH)
+pipx install .               # with pipx
+python3 -m pip install .     # with plain pip, ideally in a virtual environment
+```
+
+Then run `arxiv-digest setup` to add the app to your applications and open it.
+
+If your `python3` is 3.15 (or older than 3.11), pip and pipx refuse to install, because onnxruntime has no 3.15 build yet. In that case either:
+- use uv, which fetches a supported Python automatically, or
+- point pipx at a supported one: `pipx install --python python3.13 .`
+
+## Development
+
+```bash
+uv sync
+uv run pytest           # fast and offline: fake arXiv responses and a fake model
+uv run ruff check . && uv run ruff format --check .
+```
 
 ## License
 
