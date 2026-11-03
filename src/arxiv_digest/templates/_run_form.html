@@ -1,8 +1,11 @@
-<form method="post" action="/run" class="run-form">
+<form method="post" action="/run" class="run-form hero-actions">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <button type="submit" class="primary"{% if job.state == 'running' %} disabled{% endif %}>
+  <button type="submit" class="primary big"{% if job.state == 'running' %} disabled{% endif %}>
     {% if job.state == 'running' %}Running…{% else %}Run today's digest{% endif %}
   </button>
-  <label><input type="checkbox" name="use_claude" checked> Let Claude choose and explain</label>
-  <label><input type="checkbox" name="include_seen"> Include papers already shown (redo the latest announcement)</label>
+  <div class="options">
+    <label><input type="checkbox" name="use_claude" checked> Let Claude choose and explain</label>
+    <label><input type="checkbox" name="include_seen"> Include papers already shown</label>
+  </div>
+  {% if latest_link %}<a class="latest-link" href="{{ latest_link }}">Open latest digest →</a>{% endif %}
 </form>

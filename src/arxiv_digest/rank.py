@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .claude_cli import ClaudeAnswer, ClaudeCLI, ClaudeError
+from .claude_cli import ClaudeAnswer, ClaudeCLI, ClaudeError, ClaudeNotSignedIn
 from .config import Config, Interest
 from .shortlist import Candidate
 
@@ -40,6 +40,8 @@ class Ranker(Protocol):
     label: str
 
     def available(self) -> bool: ...
+
+    def signed_in(self) -> bool | None: ...
 
     def rank(self, config: Config, shortlisted: Sequence[Candidate]) -> RankResult: ...
 
@@ -233,6 +235,9 @@ class ClaudeRanker:
     def available(self) -> bool:
         return self.cli.available()
 
+    def signed_in(self) -> bool | None:
+        return self.cli.status().logged_in
+
     def rank(self, config: Config, shortlisted: Sequence[Candidate]) -> RankResult:
         if not shortlisted:
             return RankResult(picks=[])
@@ -244,6 +249,7 @@ class ClaudeRanker:
 
 __all__ = [
     "ClaudeError",
+    "ClaudeNotSignedIn",
     "ClaudeRanker",
     "Pick",
     "RankResult",

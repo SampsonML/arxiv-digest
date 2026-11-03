@@ -89,3 +89,14 @@ def test_add_and_remove_categories_keep_comments(tmp_path):
         cfg.add_categories(path, ["hep-tx"])
     with pytest.raises(cfg.ConfigError, match="at least one"):
         cfg.remove_categories(path, ["astro-ph.CO", "hep-th"])
+
+
+def test_app_background_setting(tmp_path):
+    base = 'categories = ["cs.LG"]\n[[interest]]\nname="x"\nkeywords=["y"]\n'
+    assert cfg.parse(base, tmp_path / "c.toml").app_background == "default"
+    text = 'app_background = "none"\n' + base
+    assert cfg.parse(text, tmp_path / "c.toml").app_background == "none"
+    text = 'app_background = "pics/night.webp"\n' + base
+    assert cfg.parse(text, tmp_path / "c.toml").app_background == str(tmp_path / "pics/night.webp")
+    with pytest.raises(cfg.ConfigError, match="jpg, .png or .webp"):
+        cfg.parse('app_background = "notes.txt"\n' + base, tmp_path / "c.toml")

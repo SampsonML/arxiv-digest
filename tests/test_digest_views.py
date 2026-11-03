@@ -81,7 +81,18 @@ def test_html_view_escapes_and_links():
     assert '<span class="followed">Vera Rubin</span>' in body
     assert '<span class="tag">Fast sims</span>' in body
     assert "#1 of 616 by meaning (similarity 0.53)" in body
-    assert body.count('class="paper top"') == 1 and body.count('class="paper"') == 2
+    assert body.count('class="paper top has-gauge"') == 1 and body.count('class="paper"') == 2
+
+
+def test_html_cards_have_gauge_and_interest_colours():
+    body = digest_body(_digest())
+    assert 'aria-label="Relevance 9 out of 10"' in body
+    assert 'stroke-dasharray="90 100"' in body and "<span>9</span>" in body
+    assert "relevance 9/10" not in body  # shown by the gauge instead
+    assert 'id="paper-2611.00001" style="--tag: #e3925a"' in body  # first interest: copper
+    assert 'id="paper-2611.00003" style="--tag: #e6c15c"' in body  # removed interest: next colour
+    assert '<section class="interest" style="--tag: #e3925a">' in body
+    assert 'class="arxiv-id"' in body
 
 
 def test_standalone_page_is_complete():

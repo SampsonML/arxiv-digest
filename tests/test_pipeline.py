@@ -132,20 +132,26 @@ def test_run_writes_html_and_saves_the_digest(tmp_path, make_config):
 class FakeRanker:
     label = "Claude (fake)"
 
-    def __init__(self, choose=(), error=None, installed=True):
+    def __init__(self, choose=(), error=None, installed=True, signed_in=True):
         self.choose = list(choose)
         self.error = error
         self.installed = installed
+        self._signed_in = signed_in
         self.seen_shortlist = None
 
     def available(self):
         return self.installed
+
+    def signed_in(self):
+        return self._signed_in
 
     def rank(self, config, shortlisted):
         from arxiv_digest.claude_cli import ClaudeAnswer, ClaudeError
         from arxiv_digest.rank import Pick, RankResult
 
         self.seen_shortlist = [c.paper.id for c in shortlisted]
+        if isinstance(self.error, Exception):
+            raise self.error
         if self.error:
             raise ClaudeError(self.error)
         by_id = {c.paper.id: c for c in shortlisted}
@@ -225,3 +231,39 @@ def test_no_claude_option_skips_ranker(tmp_path, make_config):
         now=NOW,
     )
     assert ranker.seen_shortlist is None
+
+
+def test_signed_out_claude_is_skipped_with_a_sign_in_note(tmp_path, make_config):
+    config = make_config()
+    store = Store(tmp_path / "db.sqlite3")
+    ranker = FakeRanker(choose=["2611.00002"], signed_in=False)
+    result = run_digest(
+        config,
+        store,
+        FakeClient(_papers()),
+        FakeEmbedder(),
+        ranker=ranker,
+        log=lambda m: None,
+        now=NOW,
+    )
+    assert ranker.seen_shortlist is None  # no call was attempted
+    assert "isn't signed in" in result.markdown and "claude auth login" in result.markdown
+    assert result.picks  # the local ranking is used instead
+
+
+def test_sign_in_error_during_the_call_gets_the_same_note(tmp_path, make_config):
+    from arxiv_digest.claude_cli import ClaudeNotSignedIn
+
+    config = make_config()
+    store = Store(tmp_path / "db.sqlite3")
+    ranker = FakeRanker(error=ClaudeNotSignedIn("token expired"), signed_in=None)
+    result = run_digest(
+        config,
+        store,
+        FakeClient(_papers()),
+        FakeEmbedder(),
+        ranker=ranker,
+        log=lambda m: None,
+        now=NOW,
+    )
+    assert "isn't signed in" in result.markdown and "claude auth login" in result.markdown

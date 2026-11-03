@@ -9,7 +9,7 @@
 {{ css }}
 </style>
 </head>
-<body>
+<body{% if background_url %} class="has-bg" style="--bg-image: url('{{ background_url }}')"{% endif %}>
 <nav class="topbar">
   <a class="brand" href="/">arxiv-digest</a>
   {% set path = request.url.path %}

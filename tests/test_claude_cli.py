@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from arxiv_digest.claude_cli import ClaudeCLI, ClaudeError
+from arxiv_digest.claude_cli import ClaudeCLI, ClaudeError, ClaudeNotSignedIn
 
 SCHEMA = {"type": "object"}
 
@@ -87,3 +87,41 @@ def test_missing_command():
     assert not cli.available()
     with pytest.raises(ClaudeError, match="not found"):
         cli.ask("s", "p", SCHEMA)
+
+
+def test_not_signed_in_error_is_recognised():
+    runner = FakeRunner(stdout=_envelope(is_error=True, result="Not logged in · Please run /login"))
+    with pytest.raises(ClaudeNotSignedIn):
+        _cli(runner).ask("s", "p", SCHEMA)
+
+
+def test_status_signed_in():
+    out = json.dumps(
+        {"loggedIn": True, "authMethod": "claude.ai", "email": "a@b.c", "subscriptionType": "max"}
+    )
+    runner = FakeRunner(stdout=out)
+    status = _cli(runner).status()
+    assert (status.installed, status.logged_in, status.email, status.plan) == (
+        True,
+        True,
+        "a@b.c",
+        "max",
+    )
+    assert status.describe() == "Signed in to Claude as a@b.c (Max plan)"
+    argv, kwargs = runner.calls[0]
+    assert argv[1:] == ["auth", "status", "--json"] and kwargs["stdin"] == subprocess.DEVNULL
+
+
+def test_status_signed_out_still_parses_output_despite_exit_code():
+    runner = FakeRunner(stdout=json.dumps({"loggedIn": False, "authMethod": "none"}), returncode=1)
+    status = _cli(runner).status()
+    assert status.logged_in is False
+    assert status.describe() == "Claude Code is installed but not signed in"
+
+
+def test_status_unknown_or_missing():
+    assert _cli(FakeRunner(stdout="Usage: claude ...")).status().logged_in is None
+    assert _cli(FakeRunner(exc=subprocess.TimeoutExpired("c", 1))).status().logged_in is None
+    missing = ClaudeCLI("definitely-not-a-real-command-xyz", runner=FakeRunner())
+    assert missing.status().installed is False
+    assert missing.login_command()[-2:] == ["auth", "login"]

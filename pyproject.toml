@@ -6,8 +6,9 @@ readme = "README.md"
 authors = [
     { name = "Matt Wiemann", email = "44228257+SampsonML@users.noreply.github.com" }
 ]
-license = "MIT"
-license-files = ["LICENSE"]
+# The code is MIT; the bundled fonts (Inter, Space Grotesk, JetBrains Mono) are OFL-1.1.
+license = "MIT AND OFL-1.1"
+license-files = ["LICENSE", "src/arxiv_digest/assets/fonts/LICENSE-*.txt"]
 keywords = ["arxiv", "papers", "research", "digest", "claude", "mcp"]
 classifiers = [
     "Environment :: Console",

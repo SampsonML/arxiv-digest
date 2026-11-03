@@ -30,6 +30,7 @@ TOP_LEVEL_KEYS = {
     "claude_model",
     "claude_command",
     "claude_timeout",
+    "app_background",
     "interest",
 }
 INTEREST_KEYS = {"name", "description", "keywords", "require", "exclude", "authors"}
@@ -81,6 +82,7 @@ class Config:
     claude_model: str = "sonnet"
     claude_command: str = "claude"
     claude_timeout: float = 600.0
+    app_background: str = "default"  # "default", "none", or a path to an image
 
 
 def _expect(cond: bool, message: str) -> None:
@@ -214,7 +216,32 @@ def parse(text: str, path: Path) -> Config:
         claude_model=claude_model.strip(),
         claude_command=claude_command.strip(),
         claude_timeout=float(_number(data, "claude_timeout", 600, 30, 3600)),
+        app_background=_background(data.get("app_background", "default"), path),
     )
+
+
+BACKGROUND_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def _background(value: Any, config_path: Path) -> str:
+    _expect(
+        isinstance(value, str) and value.strip() != "",
+        '`app_background` must be "default", "none" or the path to an image',
+    )
+    value = value.strip()
+    if value in ("default", "none"):
+        return value
+    path = _resolve_dir(value, config_path)
+    _expect(
+        path.suffix.lower() in BACKGROUND_TYPES,
+        f"`app_background` must be a .jpg, .png or .webp image (got {value!r})",
+    )
+    return str(path)
 
 
 def load(path: Path) -> Config:
@@ -273,6 +300,10 @@ def render_template(
         "use_claude = true",
         '# "sonnet" (default), "haiku" (faster, lighter) or "opus" (most thorough).',
         'claude_model = "sonnet"',
+        "",
+        '# Background of `arxiv-digest app`: "default" (a night-sky image),',
+        '# "none", or the path to your own .jpg/.png/.webp image.',
+        '# app_background = "default"',
         "",
         "# The local embedding model (downloaded once, ~90 MB, runs on the CPU).",
         '# "BAAI/bge-small-en-v1.5" ranks a little better but uses ~4x the CPU.',

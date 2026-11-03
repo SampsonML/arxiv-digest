@@ -4,62 +4,116 @@
   {% if problem %}
   <p class="error"><strong>Your config has a problem:</strong> {{ problem }} <a href="/settings">Fix it in Settings</a>.</p>
   {% elif not conf %}
-  <div class="card welcome">
-    <h1>Welcome to arxiv-digest</h1>
-    <p>Tell it which arXiv categories to watch and what you're interested in, then run your first digest.</p>
-    <p><a class="button primary" href="/settings">Set up your interests</a></p>
-  </div>
+  <section class="hero">
+    <p class="eyebrow">arxiv-digest</p>
+    <h1>Welcome</h1>
+    <p class="lede">Tell it which arXiv categories to watch and what you're interested in, then run your first digest.</p>
+    <a class="button primary" href="/settings">Set up your interests</a>
+  </section>
   {% endif %}
 
   {% if conf %}
-  <div class="card" id="interests">
+  <section class="hero">
+    <p class="eyebrow">{{ hero.today }} · {{ conf.categories | join(" · ") }}</p>
+    <h1>{{ hero.greeting }}</h1>
+    {% if hero.latest %}
+    <p class="lede">Your last digest, {{ hero.latest.when_text }}, picked {{ hero.latest.picked }} of {{ hero.latest.new }} new papers.</p>
+    <div class="stats-row">
+      <div class="stat"><span class="num">{{ hero.latest.new }}</span><span class="label">new papers</span></div>
+      <div class="stat"><span class="num">{{ hero.latest.shortlisted }}</span><span class="label">shortlisted</span></div>
+      <div class="stat glow"><span class="num">{{ hero.latest.picked }}</span><span class="label">picked for you</span></div>
+    </div>
+    {% else %}
+    <p class="lede">No digests yet. Run your first one below.</p>
+    {% endif %}
+    {% include "_claude_status.html" %}
+    {% with latest_link = ("/digest/" ~ hero.latest.id) if hero.latest else None %}{% include "_run_form.html" %}{% endwith %}
+  </section>
+
+  <section class="card" id="interests">
     <h2 class="card-title">Your interests</h2>
     {% if interests_saved %}<p class="success">Interests saved. The next run uses them.</p>{% endif %}
     {% if interests_error %}<p class="error"><strong>Not saved:</strong> {{ interests_error }}</p>{% endif %}
-    <p class="muted">Click an interest to change it, or add a new one. Watching {{ conf.categories | join(", ") }} (<a href="/settings">change categories</a>).</p>
-    <form method="post" action="/interests" class="settings interests-quick">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="chips">
       {% for interest in interests %}
-      <details class="interest-row"{% if interests_error %} open{% endif %}>
-        <summary><strong>{{ interest.name or "(unnamed)" }}</strong>{% set line = summary(interest) %}{% if line %}<span class="muted"> — {{ line }}</span>{% endif %}<span class="edit">Edit</span></summary>
-        {% with i = loop.index0, new = False %}{% include "_interest.html" %}{% endwith %}
-      </details>
+      <button type="button" class="chip" data-edit="{{ loop.index0 }}" style="--tag: {{ colors[interest.name] or '#e3925a' }}" title="{{ summary(interest) }}"><span class="chip-dot"></span>{{ interest.name or "(unnamed)" }}</button>
       {% endfor %}
-      <details class="interest-row add"{% if not interests %} open{% endif %}>
-        <summary><strong>+ Add an interest</strong></summary>
-        {% with i = interests | length, new = True, interest = empty_interest %}{% include "_interest.html" %}{% endwith %}
-      </details>
-      <div class="buttons">
-        <button type="submit" name="action" value="save">Save interests</button>
-        <button type="submit" name="action" value="save_run" class="primary"{% if job.state == 'running' %} disabled{% endif %}>Save and re-run the latest announcement</button>
+      <button type="button" class="chip add" data-edit="new">+ Add interest</button>
+    </div>
+    <noscript><p class="muted small">Edit interests in <a href="/settings">Settings</a>.</p></noscript>
+  </section>
+
+  <div class="drawer-backdrop" data-close></div>
+  <form method="post" action="/interests" class="drawer" id="drawer" aria-hidden="true"{% if interests_error %} data-open="all"{% endif %}>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <header>
+      <h2 id="drawer-title">Your interests</h2>
+      <button type="button" class="close" data-close aria-label="Close">✕</button>
+    </header>
+    <div class="panels">
+      {% for interest in interests %}
+      <div class="panel" data-panel="{{ loop.index0 }}">
+        {% with i = loop.index0, new = False %}{% include "_interest.html" %}{% endwith %}
       </div>
-    </form>
-  </div>
+      {% endfor %}
+      <div class="panel" data-panel="new">
+        {% with i = interests | length, new = True, interest = empty_interest %}{% include "_interest.html" %}{% endwith %}
+      </div>
+    </div>
+    <div class="actions">
+      <button type="submit" name="action" value="save">Save</button>
+      <button type="submit" name="action" value="save_run" class="primary"{% if job.state == 'running' %} disabled{% endif %}>Save and re-run latest announcement</button>
+    </div>
+  </form>
 
-  <div class="card">
-    <h2 class="card-title">New digest</h2>
-    <p class="muted">Fetch the papers announced since your last run and pick the best for your {{ conf.interests | length }} interest{{ "s" if conf.interests | length != 1 }}.</p>
-    {% include "_run_form.html" %}
-  </div>
-  {% endif %}
-
-  <h2>Digests</h2>
+  <h2 class="section-title">Digests</h2>
   {% if digests %}
+  <div class="table-card">
   <table class="list">
-    <thead><tr><th>Date</th><th>Picked</th><th>New papers</th><th>Files</th></tr></thead>
+    <thead><tr><th>Date</th><th>Picked</th><th>New papers</th><th>File</th></tr></thead>
     <tbody>
     {% for d in digests %}
       <tr>
         <td><a href="/digest/{{ d.id }}">{{ d.when.strftime("%a") }} {{ d.when.day }} {{ d.when.strftime("%b %Y, %H:%M") }}</a></td>
-        <td>{{ d.picked }}</td>
-        <td>{{ d.new }}</td>
+        <td class="num">{{ d.picked }}</td>
+        <td class="num">{{ d.new }}</td>
         <td class="files">{% if d.html_path %}<code title="{{ d.html_path }}">{{ d.html_path.rsplit("/", 1)[-1] }}</code>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p class="muted">No digests yet. Digests made with arxiv-digest {{ version }} or later appear here.</p>
   {% endif %}
+  {% endif %}
 </main>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const drawer = document.getElementById("drawer");
+  if (!drawer) return;
+  const panels = drawer.querySelectorAll(".panel");
+  const title = document.getElementById("drawer-title");
+  function open(key) {
+    panels.forEach(function (p) { p.hidden = key !== "all" && p.dataset.panel !== key; });
+    title.textContent = key === "new" ? "Add an interest" : key === "all" ? "Your interests" : "Edit interest";
+    document.body.classList.add("drawer-open");
+    drawer.setAttribute("aria-hidden", "false");
+    const field = drawer.querySelector('.panel:not([hidden]) input[name$="-name"]');
+    if (field) setTimeout(function () { field.focus(); }, 250);
+  }
+  function close() {
+    document.body.classList.remove("drawer-open");
+    drawer.setAttribute("aria-hidden", "true");
+  }
+  document.querySelectorAll(".chip[data-edit]").forEach(function (chip) {
+    chip.addEventListener("click", function () { open(chip.dataset.edit); });
+  });
+  document.querySelectorAll("[data-close]").forEach(function (el) { el.addEventListener("click", close); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+  if (drawer.dataset.open) open(drawer.dataset.open);
+})();
+</script>
 {% endblock %}

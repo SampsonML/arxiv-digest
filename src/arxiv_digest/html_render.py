@@ -70,26 +70,60 @@ def _authors(entry: Entry) -> str:
     return text
 
 
-def _entry(entry: Entry, number: int | None) -> str:
+# Interest colours, taken from the night sky: copper, teal, amber, violet, rose,
+# azure, moss. Each interest keeps its colour across a digest (config order).
+INTEREST_COLORS = ["#e3925a", "#4fc1c9", "#e6c15c", "#a58bf2", "#ec8aa8", "#6fa8f5", "#9fc46a"]
+
+
+def interest_colors(names: list[str]) -> dict[str, str]:
+    return {name: INTEREST_COLORS[i % len(INTEREST_COLORS)] for i, name in enumerate(names)}
+
+
+def _color_for(colors: dict[str, str], interest: str) -> str:
+    if interest not in colors:  # an interest removed since the digest was made
+        colors[interest] = INTEREST_COLORS[len(colors) % len(INTEREST_COLORS)]
+    return colors[interest]
+
+
+def _gauge(relevance: int) -> str:
+    """A small ring showing Claude's 1-10 relevance score."""
+    filled = max(0, min(10, relevance)) * 10  # the circle's circumference is 100
+    return (
+        f'<div class="gauge" title="Relevance {relevance}/10"'
+        f' aria-label="Relevance {relevance} out of 10">'
+        '<svg viewBox="0 0 36 36" aria-hidden="true">'
+        '<circle class="gauge-track" cx="18" cy="18" r="15.915"/>'
+        f'<circle class="gauge-fill" cx="18" cy="18" r="15.915" stroke-dasharray="{filled} 100"/>'
+        f"</svg><span>{relevance}</span></div>"
+    )
+
+
+def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
     paper = entry.paper
+    color = _color_for(colors, entry.interest)
     num = f'<span class="num">{number}.</span> ' if number is not None else ""
     meta = [
-        _link(paper.abs_url, f"arXiv:{paper.id}"),
+        _link(paper.abs_url, f"arXiv:{paper.id}", "arxiv-id"),
         _link(paper.pdf_url, "PDF"),
         _e(paper.primary_category),
     ]
     if paper.comment:
         meta.append(_e(short_comment(paper)))
-    parts = [
-        f'<div class="paper{" top" if number is not None else ""}" id="paper-{_e(paper.id)}">',
+    classes = "paper" + (" top" if number is not None else "")
+    classes += " has-gauge" if entry.relevance is not None else ""
+    parts = [f'<div class="{classes}" id="paper-{_e(paper.id)}" style="--tag: {color}">']
+    if entry.relevance is not None:
+        parts.append(_gauge(entry.relevance))
+    parts += [
         f"<h3>{num}{_link(paper.abs_url, paper.title)}</h3>",
         f'<p class="meta">{" · ".join(meta)}</p>',
         f'<p class="authors">{_authors(entry)}</p>',
     ]
     if entry.why:
         parts.append(f'<p class="why"><strong>Why:</strong> {_e(entry.why)}</p>')
+    # The gauge shows the relevance score, so the text line leaves it out.
     evidence = evidence_parts(
-        entry.evidence, entry.interest, entry.relevance, with_interest=number is not None
+        entry.evidence, entry.interest, None, with_interest=number is not None
     )
     if evidence:
         if number is not None:
@@ -110,6 +144,7 @@ def _entry(entry: Entry, number: int | None) -> str:
 
 def digest_body(digest: Digest) -> str:
     """The digest as an <article>: header, top picks, interest groups, footer."""
+    colors = interest_colors(digest.interests)
     out = [
         '<article class="digest">',
         "<header>",
@@ -125,14 +160,18 @@ def digest_body(digest: Digest) -> str:
     else:
         if digest.top:
             out += ['<section class="top-picks">', "<h2>⭐ Top picks</h2>"]
-            out += [_entry(entry, number) for number, entry in enumerate(digest.top, start=1)]
+            out += [
+                _entry(entry, number, colors) for number, entry in enumerate(digest.top, start=1)
+            ]
             out.append("</section>")
         for interest, entries in digest.groups():
+            color = _color_for(colors, interest)
             out += [
-                '<section class="interest">',
-                f'<h2>{_e(interest)} <span class="count">({len(entries)})</span></h2>',
+                f'<section class="interest" style="--tag: {color}">',
+                f'<h2><span class="dot"></span>{_e(interest)}'
+                f' <span class="count">({len(entries)})</span></h2>',
             ]
-            out += [_entry(entry, None) for entry in entries]
+            out += [_entry(entry, None, colors) for entry in entries]
             out.append("</section>")
     out += [f"<footer>{_e(footer_text(digest))}</footer>", "</article>"]
     return "\n".join(out)

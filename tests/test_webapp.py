@@ -7,10 +7,11 @@ from starlette.testclient import TestClient
 
 from arxiv_digest import config as cfg
 from arxiv_digest import paths
+from arxiv_digest.claude_cli import ClaudeStatus
 from arxiv_digest.digest import Digest, Entry
 from arxiv_digest.pipeline import RunResult
 from arxiv_digest.store import Store
-from arxiv_digest.webapp import create_app
+from arxiv_digest.webapp import ClaudeAccount, create_app, sign_in_links
 
 TOKEN = "test-token"
 
@@ -30,17 +31,40 @@ def config_path(home):
     return path
 
 
-def _client(config_path, run=None, base_url="http://127.0.0.1:8765"):
-    app = create_app(
-        config_path,
-        run=run
-        or (
-            lambda c, o, log: RunResult(
-                window_start=datetime.now(UTC), window_end=datetime.now(UTC)
-            )
-        ),
-        token=TOKEN,
-    )
+class FakeAccount:
+    """Stands in for Claude Code's sign-in, so tests never call the real `claude`."""
+
+    def __init__(self, logged_in=True, installed=True):
+        self.current = ClaudeStatus(
+            installed=installed, logged_in=logged_in, email="me@example.com", plan="max"
+        )
+        self.started = 0
+        self.running = False
+        self.output = []
+
+    def status(self, fresh=False):
+        return self.current
+
+    def start_login(self):
+        self.started += 1
+        self.running = True
+        return True
+
+    def state(self):
+        return {
+            **self.current.to_dict(),
+            "login_running": self.running,
+            "output": self.output,
+            "links": sign_in_links(self.output),
+        }
+
+
+def _no_run(conf, options, log):
+    return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
+
+
+def _client(config_path, run=None, base_url="http://127.0.0.1:8765", account=None):
+    app = create_app(config_path, run=run or _no_run, token=TOKEN, account=account or FakeAccount())
     return TestClient(app, base_url=base_url), app
 
 
@@ -217,9 +241,12 @@ def test_start_page_shows_interests_for_editing(config_path):
     client, _ = _client(config_path)
     page = client.get("/").text
     assert 'action="/interests"' in page
-    assert "<strong>Fast sims</strong>" in page and "— emulators" in page
-    assert 'name="interest-0-name" value="Fast sims"' in page
-    assert "+ Add an interest" in page and 'name="interest-1-name"' in page
+    assert 'class="chip" data-edit="0" style="--tag: #e3925a"' in page
+    assert 'title="emulators"' in page and ">Fast sims</button>" in page
+    assert 'data-panel="0"' in page and 'name="interest-0-name" value="Fast sims"' in page
+    assert (
+        "+ Add interest" in page and 'data-panel="new"' in page and 'name="interest-1-name"' in page
+    )
 
 
 def _interest_form(**overrides):
@@ -280,3 +307,204 @@ def test_start_page_remove_interest_and_errors(config_path):
     assert config_path.read_text() == before
 
     assert client.post("/interests", data={"interest-0-name": "x"}).status_code == 403
+
+
+def test_start_page_shows_claude_sign_in_status(config_path):
+    client, _ = _client(config_path)
+    assert "✓ Signed in to Claude as me@example.com (Max plan)" in client.get("/").text
+
+    client, _ = _client(config_path, account=FakeAccount(logged_in=False))
+    page = client.get("/").text
+    assert "isn't signed in" in page and 'action="/claude/login"' in page
+
+    client, _ = _client(config_path, account=FakeAccount(installed=False, logged_in=None))
+    assert "Install Claude Code" in client.get("/").text
+
+
+def test_settings_links_to_sign_in_instead_of_nesting_a_form(config_path):
+    client, _ = _client(config_path, account=FakeAccount(logged_in=False))
+    page = client.get("/settings").text
+    assert '<a class="button primary" href="/claude">Sign in to Claude</a>' in page
+    assert 'action="/claude/login"' not in page
+
+
+def test_sign_in_button_starts_claude_login(config_path):
+    account = FakeAccount(logged_in=False)
+    client, _ = _client(config_path, account=account)
+    assert client.post("/claude/login", data={}).status_code == 403
+    assert account.started == 0
+    response = client.post("/claude/login", data={"csrf": TOKEN}, follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/claude"
+    assert account.started == 1
+    account.output = ["Opening https://claude.ai/oauth/authorize?code=1 in your browser"]
+    page = client.get("/claude").text
+    assert "Finish signing in" in page
+    assert 'href="https://claude.ai/oauth/authorize?code=1"' in page
+    status = client.get("/claude/status").json()
+    assert status["login_running"] is True and status["logged_in"] is False
+
+
+def test_sign_in_page_when_already_signed_in(config_path):
+    client, _ = _client(config_path)
+    assert "Signed in to Claude as me@example.com" in client.get("/claude").text
+
+
+def test_sign_in_links_only_point_to_claude():
+    lines = [
+        "Visit https://claude.ai/oauth/authorize?state=abc to sign in",
+        "or https://console.anthropic.com/login",
+        "not https://evil.example/claude.ai or https://claude.ai.evil.example/x",
+    ]
+    assert sign_in_links(lines) == [
+        "https://claude.ai/oauth/authorize?state=abc",
+        "https://console.anthropic.com/login",
+    ]
+
+
+class FakeProcess:
+    def __init__(self, lines):
+        self.stdout = iter(lines)
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self):
+        self.returncode = 0
+        return 0
+
+    def kill(self):
+        self.returncode = -9
+
+
+def test_claude_account_runs_login_in_the_background():
+    import subprocess
+    import sys
+    import time
+
+    from arxiv_digest.claude_cli import ClaudeCLI
+
+    started = []
+
+    def popen(argv, **kwargs):
+        started.append((argv, kwargs))
+        return FakeProcess(["Opening https://claude.ai/oauth/authorize?x=1\n", "Done\n"])
+
+    def status_runner(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, '{"loggedIn": true, "email": "a@b.c"}', "")
+
+    account = ClaudeAccount(lambda: ClaudeCLI(sys.executable, runner=status_runner), popen=popen)
+    assert account.start_login() is True
+    argv, kwargs = started[0]
+    assert argv[-2:] == ["auth", "login"] and kwargs["stdin"] == subprocess.DEVNULL
+    for _ in range(200):  # the output is read by a background thread
+        if account.process.poll() is not None:
+            break
+        time.sleep(0.01)
+    state = account.state()
+    assert state["logged_in"] is True and state["email"] == "a@b.c"
+    assert state["links"] == ["https://claude.ai/oauth/authorize?x=1"]
+    assert state["output"][-1] == "Done"
+
+
+def _with_background(config_path, value):
+    text = config_path.read_text().replace(
+        '# app_background = "default"', f"app_background = {value!r}".replace("'", '"')
+    )
+    config_path.write_text(text)
+
+
+def test_background_image_is_served_and_used(config_path):
+    client, _ = _client(config_path)
+    page = client.get("/").text
+    assert '<body class="has-bg"' in page
+    url = page.split("--bg-image: url('", 1)[1].split("'", 1)[0]
+    assert url.startswith("/background?v=")  # versioned, so a new image is never cached stale
+    image = client.get(url)
+    assert "immutable" in image.headers["cache-control"]
+    assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
+    assert image.content[:2] == b"\xff\xd8"  # a JPEG
+
+
+def test_background_can_be_turned_off_or_replaced(config_path, tmp_path):
+    _with_background(config_path, "none")
+    client, _ = _client(config_path)
+    assert "<body>" in client.get("/").text
+    assert client.get("/background").status_code == 404
+
+    own = tmp_path / "mine.png"
+    own.write_bytes(b"\x89PNG fake")
+    config_path.write_text(config_path.read_text().replace('"none"', f'"{own}"'))
+    response = client.get("/background")
+    assert response.headers["content-type"] == "image/png" and response.content == own.read_bytes()
+
+    own.unlink()  # a missing custom image falls back to the bundled one
+    assert client.get("/background").headers["content-type"] == "image/jpeg"
+
+
+def test_start_page_header_uses_the_latest_digest(config_path):
+    client, _ = _client(config_path)
+    page = client.get("/").text
+    assert "No digests yet" in page and "Good " in page
+    digest_id = _save_digest()
+    page = client.get("/").text
+    assert '<span class="num">616</span>' in page and '<span class="num">35</span>' in page
+    assert "picked 1 of 616 new papers" in page
+    assert f'href="/digest/{digest_id}">Open latest digest' in page
+
+
+def test_fonts_are_served_safely(config_path):
+    client, _ = _client(config_path)
+    font = client.get("/fonts/inter-latin.woff2")
+    assert font.status_code == 200 and font.headers["content-type"] == "font/woff2"
+    assert font.content[:4] == b"wOF2"
+    assert client.get("/fonts/..%2Fbackground.jpg").status_code == 404
+    assert client.get("/fonts/missing.woff2").status_code == 404
+    assert (
+        "@font-face" in client.get("/").text
+        and 'font-family: "Space Grotesk"' in client.get("/").text
+    )
+
+
+def test_run_tracker_reports_steps_and_counts(config_path):
+    release = threading.Event()
+
+    def staged_run(conf, options, log):
+        log.step("fetch", {"done": 500, "total": 925})
+        log.step("shortlist", {"new": 616})
+        log.step("claude", {"shortlisted": 35})
+        release.wait(5)
+        log.step("write", {"picked": 3})
+        return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
+
+    client, app = _client(config_path, run=staged_run)
+    client.post("/run", data={"csrf": TOKEN, "use_claude": "on"})
+    for _ in range(100):
+        status = client.get("/run/status").json()
+        if status["step"] == "claude":
+            break
+        threading.Event().wait(0.01)
+    assert status["state"] == "running" and status["claude_used"] is True
+    assert status["counts"] == {"fetched": 500, "total": 925, "new": 616, "shortlisted": 35}
+    page = client.get("/run").text
+    assert 'id="tracker"' in page and '"step": "claude"' in page
+    release.set()
+    app.state.runner.thread.join(5)
+    status = client.get("/run/status").json()
+    assert status["state"] == "done" and status["counts"]["picked"] == 0  # from the result
+
+
+def test_greeting_and_time_ago():
+    from datetime import timedelta
+
+    from arxiv_digest.webapp import greeting, time_ago
+
+    morning = datetime(2026, 11, 3, 8, 0)
+    assert greeting(morning) == "Good morning"
+    assert greeting(morning.replace(hour=14)) == "Good afternoon"
+    assert greeting(morning.replace(hour=22)) == "Good evening"
+    assert time_ago(morning - timedelta(seconds=30), morning) == "just now"
+    assert time_ago(morning - timedelta(minutes=20), morning) == "20 minutes ago"
+    assert time_ago(morning - timedelta(hours=5), morning) == "5 hours ago"
+    assert time_ago(morning - timedelta(days=1, hours=2), morning) == "yesterday"
+    assert time_ago(morning - timedelta(days=4), morning) == "4 days ago"

@@ -4,31 +4,84 @@
 <main class="page">
   <h1>Run</h1>
   {% if job.state == 'idle' %}
-  <div class="card">
+  <section class="card">
     <p class="muted">Nothing is running. Start a new digest:</p>
     {% include "_run_form.html" %}
-  </div>
+  </section>
   {% else %}
-  <p id="status" class="status {{ job.state }}">
-    {% if job.state == 'running' %}Running…{% elif job.state == 'done' %}{{ job.message }}{% else %}Failed: {{ job.message }}{% endif %}
-  </p>
-  <pre id="log" class="log">{{ job.lines | join("\n") }}</pre>
-  <p id="actions">
-    {% if job.state == 'done' and job.digest_id %}<a class="button primary" href="/digest/{{ job.digest_id }}">Open the digest</a>{% endif %}
-  </p>
+  <section class="card tracker {{ job.state }}" id="tracker">
+    <ol class="steps">
+      <li data-step="fetch"><span class="step-name"><span class="marker"></span>Fetch</span><span class="count"></span></li>
+      <li data-step="shortlist"><span class="step-name"><span class="marker"></span>Shortlist</span><span class="count"></span></li>
+      <li data-step="claude"><span class="step-name"><span class="marker"></span>Claude</span><span class="count"></span></li>
+      <li data-step="done"><span class="step-name"><span class="marker"></span>Done</span><span class="count"></span></li>
+    </ol>
+    <div class="bar"><div class="fill"></div></div>
+    <p class="result" id="result">{% if job.state == 'done' %}{{ job.message }}{% elif job.state == 'error' %}Failed: {{ job.message }}{% else %}Running…{% endif %}</p>
+    <p id="actions">{% if job.state == 'done' and job.digest_id %}<a class="button primary" href="/digest/{{ job.digest_id }}">Open the digest</a>{% endif %}</p>
+    <details class="raw-log"{% if job.state == 'error' %} open{% endif %}>
+      <summary>Log</summary>
+      <pre id="log" class="log">{{ job.lines | join("\n") }}</pre>
+    </details>
+  </section>
   {% if job.state != 'running' %}
-  <div class="card">{% include "_run_form.html" %}</div>
+  <section class="card">{% include "_run_form.html" %}</section>
   {% endif %}
   {% endif %}
 </main>
 {% endblock %}
 {% block scripts %}
-{% if job.state == 'running' %}
+{% if job.state != 'idle' %}
 <script>
 (function () {
+  const ORDER = ["fetch", "shortlist", "claude", "done"];
+  const tracker = document.getElementById("tracker");
+  const fill = tracker.querySelector(".bar .fill");
   const log = document.getElementById("log");
-  const status = document.getElementById("status");
+  const result = document.getElementById("result");
   const actions = document.getElementById("actions");
+  const n = function (v) { return v === null || v === undefined ? "" : String(v); };
+
+  function render(job) {
+    const c = job.counts || {};
+    const finished = job.state === "done";
+    const failed = job.state === "error";
+    let active = job.step === "write" ? 3 : Math.max(0, ORDER.indexOf(job.step));
+    if (finished) active = 4;
+    const claudeSkipped = !job.claude_used && (finished || active >= 3);
+    tracker.className = "card tracker " + job.state;
+    tracker.querySelectorAll(".steps li").forEach(function (li, i) {
+      li.className = i < active ? "done" : i === active ? (failed ? "active failed" : "active") : "";
+      if (li.dataset.step === "claude" && claudeSkipped) li.className = "skipped";
+    });
+    const counts = {
+      fetch: c.total ? n(c.fetched) + " / " + n(c.total) : c.fetched ? n(c.fetched) + " papers" : "",
+      shortlist: c.new !== undefined ? n(c.new) + " new" + (c.shortlisted !== undefined ? " → " + n(c.shortlisted) : "") : "",
+      claude: claudeSkipped ? "skipped" : c.shortlisted !== undefined && job.claude_used ? (active > 2 ? "read " : "reading ") + n(c.shortlisted) : "",
+      done: finished ? n(c.picked) + " picked" : job.step === "write" ? "saving…" : ""
+    };
+    tracker.querySelectorAll(".steps li").forEach(function (li) {
+      li.querySelector(".count").textContent = counts[li.dataset.step] || "";
+    });
+    let pct = 4;
+    if (job.step === "fetch" && c.total) pct = 5 + 25 * (c.fetched || 0) / c.total;
+    else if (job.step === "shortlist") pct = 42;
+    else if (job.step === "claude") pct = 70;
+    else if (job.step === "write") pct = 92;
+    if (finished) pct = 100;
+    fill.style.width = pct + "%";
+    log.textContent = job.lines.join("\n");
+    if (finished) result.textContent = job.message;
+    if (failed) result.textContent = "Failed: " + job.message;
+    if (finished && job.digest_id && !actions.querySelector("a")) {
+      const link = document.createElement("a");
+      link.className = "button primary";
+      link.href = "/digest/" + job.digest_id;
+      link.textContent = "Open the digest";
+      actions.appendChild(link);
+    }
+  }
+
   async function poll() {
     let job;
     try {
@@ -37,24 +90,15 @@
       setTimeout(poll, 2000);
       return;
     }
-    log.textContent = job.lines.join("\n");
-    log.scrollTop = log.scrollHeight;
-    if (job.state === "running") {
-      setTimeout(poll, 1000);
-      return;
-    }
-    status.className = "status " + job.state;
-    status.textContent = job.state === "done" ? job.message : "Failed: " + job.message;
-    if (job.state === "done" && job.digest_id) {
-      const link = document.createElement("a");
-      link.className = "button primary";
-      link.href = "/digest/" + job.digest_id;
-      link.textContent = "Open the digest";
-      actions.appendChild(link);
-      setTimeout(function () { window.location.href = link.href; }, 1500);
+    render(job);
+    if (job.state === "running") setTimeout(poll, 800);
+    else if (job.state === "done" && job.digest_id && wasRunning) {
+      setTimeout(function () { window.location.href = "/digest/" + job.digest_id; }, 2600);
     }
   }
-  poll();
+  const wasRunning = {{ (job.state == 'running') | tojson }};
+  render({{ job_status | tojson }});
+  if (wasRunning) poll();
 })();
 </script>
 {% endif %}

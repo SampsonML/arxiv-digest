@@ -10,8 +10,12 @@ local app that can change files and start runs:
 
 from __future__ import annotations
 
+import hashlib
+import re
 import secrets
+import subprocess
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,6 +23,7 @@ from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup
@@ -32,7 +37,8 @@ from starlette.routing import Route
 from . import __version__, paths
 from . import categories as cats
 from . import config as cfg
-from .html_render import KATEX_HEAD, KATEX_SCRIPTS, digest_body, stylesheet
+from .claude_cli import SIGN_IN_HINT, ClaudeCLI, ClaudeStatus
+from .html_render import KATEX_HEAD, KATEX_SCRIPTS, digest_body, interest_colors, stylesheet
 from .pipeline import RunOptions, RunResult, run_with_config
 from .store import Store
 
@@ -41,7 +47,10 @@ RunFunction = Callable[[cfg.Config, RunOptions, Callable[[str], None]], RunResul
 
 
 def _default_run(config: cfg.Config, options: RunOptions, log: Callable[[str], None]) -> RunResult:
-    return run_with_config(config, options, log=log)
+    progress = getattr(log, "step", None)  # the Runner's reporter tracks steps too
+    if progress is None:
+        return run_with_config(config, options, log=log)
+    return run_with_config(config, options, log=log, progress=progress)
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +64,33 @@ class Job:
     digest_id: int | None = None
     message: str = ""
     started: datetime | None = None
+    step: str = ""  # fetch | shortlist | claude | write (see pipeline.Progress)
+    counts: dict[str, int | None] = field(default_factory=dict)
+    claude_used: bool = False
+
+
+class _Reporter:
+    """The `log` handed to a run: collects log lines and tracks the current step."""
+
+    def __init__(self, job: Job) -> None:
+        self.job = job
+
+    def __call__(self, line: str) -> None:
+        self.job.lines.append(line)
+
+    def step(self, name: str, details: dict) -> None:
+        job = self.job
+        job.step = name
+        if name == "fetch":
+            job.counts["fetched"] = details.get("done")
+            job.counts["total"] = details.get("total")
+        elif name == "shortlist":
+            job.counts["new"] = details.get("new")
+        elif name == "claude":
+            job.counts["shortlisted"] = details.get("shortlisted")
+            job.claude_used = True
+        elif name == "write":
+            job.counts["picked"] = details.get("picked")
 
 
 class Runner:
@@ -78,7 +114,7 @@ class Runner:
 
     def _work(self, job: Job, config: cfg.Config, options: RunOptions) -> None:
         try:
-            result = self._run(config, options, job.lines.append)
+            result = self._run(config, options, _Reporter(job))
         except Exception as exc:  # shown in the page; the server keeps running
             job.lines.append("".join(traceback.format_exception_only(exc)).strip())
             job.message = str(exc) or exc.__class__.__name__
@@ -86,6 +122,12 @@ class Runner:
             return
         job.lines.extend(f"Note: {note}" for note in result.notes)
         job.digest_id = result.digest_id
+        job.counts.update(
+            fetched=result.fetched,
+            new=len(result.new_papers),
+            shortlisted=len(result.shortlisted),
+            picked=len(result.picks),
+        )
         if result.digest is None:
             job.message = "No new papers since the last run."
         else:
@@ -94,6 +136,103 @@ class Runner:
                 f" · {len(result.picks)} picked"
             )
         job.state = "done"
+
+
+# ---------------------------------------------------------------------------
+# Claude Code sign-in
+
+SIGN_IN_HOSTS = ("claude.ai", "claude.com", "anthropic.com")
+_URL = re.compile(r"https://[^\s'\"<>]+")
+
+
+def sign_in_links(lines: list[str]) -> list[str]:
+    """Sign-in URLs printed by `claude auth login`, limited to Anthropic's own sites."""
+    links: list[str] = []
+    for line in lines:
+        for url in _URL.findall(line):
+            host = (urlparse(url).hostname or "").lower()
+            if any(host == h or host.endswith("." + h) for h in SIGN_IN_HOSTS) and url not in links:
+                links.append(url)
+    return links
+
+
+class ClaudeAccount:
+    """Claude Code's sign-in status (cached briefly) and a background `claude auth login`.
+
+    The login itself is Claude Code's: it opens Claude's sign-in page in the
+    browser and stores the credentials where Claude Code keeps them.
+    arxiv-digest never sees them.
+    """
+
+    LOGIN_TIMEOUT = 600  # seconds before an unfinished sign-in is stopped
+
+    def __init__(
+        self,
+        cli_factory: Callable[[], ClaudeCLI],
+        *,
+        popen: Callable[..., Any] = subprocess.Popen,
+        cache_seconds: float = 10.0,
+    ) -> None:
+        self._cli_factory = cli_factory
+        self._popen = popen
+        self._cache_seconds = cache_seconds
+        self._cached: tuple[float, ClaudeStatus] | None = None
+        self._lock = threading.Lock()
+        self.process: Any = None
+        self.output: list[str] = []
+
+    def status(self, fresh: bool = False) -> ClaudeStatus:
+        now = time.monotonic()
+        if not fresh and self._cached and now - self._cached[0] < self._cache_seconds:
+            return self._cached[1]
+        status = self._cli_factory().status()
+        self._cached = (now, status)
+        return status
+
+    @property
+    def login_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def start_login(self) -> bool:
+        """Start `claude auth login` unless it is already running; False if not installed."""
+        cli = self._cli_factory()
+        if not cli.available():
+            return False
+        with self._lock:
+            if self.login_running:
+                return True
+            self.output = []
+            self.process = self._popen(
+                cli.login_command(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            process = self.process
+        threading.Thread(target=self._follow, args=(process,), daemon=True).start()
+        return True
+
+    def _follow(self, process: Any) -> None:
+        timer = threading.Timer(self.LOGIN_TIMEOUT, process.kill)
+        timer.daemon = True
+        timer.start()
+        try:
+            for line in process.stdout or []:
+                self.output.append(line.rstrip())
+            process.wait()
+        finally:
+            timer.cancel()
+            self._cached = None  # the next status check asks Claude Code again
+
+    def state(self) -> dict[str, Any]:
+        status = self.status(fresh=True)
+        return {
+            **status.to_dict(),
+            "login_running": self.login_running,
+            "output": self.output[-20:],
+            "links": sign_in_links(self.output),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +285,32 @@ def interest_summary(interest: cfg.Interest, limit: int = 90) -> str:
 
 
 EMPTY_INTEREST = cfg.Interest(name="")
+
+
+def greeting(now: datetime) -> str:
+    hour = now.hour
+    if 5 <= hour < 12:
+        return "Good morning"
+    if 12 <= hour < 18:
+        return "Good afternoon"
+    return "Good evening"
+
+
+def time_ago(then: datetime, now: datetime) -> str:
+    seconds = max(0, (now - then).total_seconds())
+    if seconds < 90:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} minutes ago"
+    if seconds < 2 * 3600:
+        return "an hour ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} hours ago"
+    days = int(seconds // 86400)
+    return "yesterday" if days == 1 else f"{days} days ago"
+
+
+FONT_FILE = re.compile(r"^[a-z-]+\.woff2$")
 
 
 # ---------------------------------------------------------------------------
@@ -239,15 +404,29 @@ def create_app(
     *,
     run: RunFunction = _default_run,
     token: str | None = None,
+    account: ClaudeAccount | None = None,
 ) -> Starlette:
     config_path = config_path or paths.config_path()
     csrf_token = token or secrets.token_urlsafe(32)
     runner = Runner(run)
+
+    def current_cli() -> ClaudeCLI:
+        conf, _ = load_config()
+        return ClaudeCLI(conf.claude_command if conf else "claude")
+
+    account = account or ClaudeAccount(current_cli)
     env = Environment(
         loader=PackageLoader("arxiv_digest", "templates"),
         autoescape=select_autoescape(["html"]),
     )
-    app_css = resources.files("arxiv_digest").joinpath("assets/app.css").read_text("utf-8")
+    assets = resources.files("arxiv_digest").joinpath("assets")
+    app_css = assets.joinpath("app.css").read_text("utf-8")
+    fonts_css = assets.joinpath("fonts.css").read_text("utf-8")
+
+    bundled_background = (
+        resources.files("arxiv_digest").joinpath("assets/background.jpg").read_bytes()
+    )
+    bundled_version = hashlib.sha256(bundled_background).hexdigest()[:12]
 
     def load_config() -> tuple[cfg.Config | None, str | None]:
         if not config_path.exists():
@@ -257,14 +436,34 @@ def create_app(
         except cfg.ConfigError as exc:
             return None, str(exc)
 
+    def background_setting() -> str:
+        conf, _ = load_config()
+        return conf.app_background if conf else "default"
+
+    def background_url() -> str | None:
+        """The image's URL, versioned by its content so browsers never show a stale one."""
+        setting = background_setting()
+        if setting == "none":
+            return None
+        version = bundled_version
+        if setting != "default":
+            try:
+                info = Path(setting).stat()
+                version = f"{int(info.st_mtime)}-{info.st_size}"
+            except OSError:
+                pass  # missing: the bundled image is served instead
+        return f"/background?v={version}"
+
     def page(name: str, request: Request, status: int = 200, **context: Any) -> HTMLResponse:
         template = env.get_template(name)
         html = template.render(
+            background_url=background_url(),
             request=request,
-            css=Markup(stylesheet() + "\n" + app_css),
+            css=Markup(fonts_css + "\n" + stylesheet() + "\n" + app_css),
             csrf=csrf_token,
             version=__version__,
             job=runner.job,
+            sign_in_hint=SIGN_IN_HINT,
             **context,
         )
         return HTMLResponse(html, status_code=status)
@@ -297,6 +496,28 @@ def create_app(
             }
             for row in rows
         ]
+        now = datetime.now().astimezone()
+        hero: dict[str, Any] = {
+            "greeting": greeting(now),
+            "today": f"{now:%A} {now.day} {now:%B}",
+            "latest": None,
+        }
+        if rows:
+            store = Store(paths.database_path())
+            try:
+                found = store.get_digest(rows[0]["id"])
+            finally:
+                store.close()
+            if found:
+                latest, _ = found
+                hero["latest"] = {
+                    "id": rows[0]["id"],
+                    "new": latest.new_papers,
+                    "shortlisted": latest.shortlisted,
+                    "picked": len(latest.entries),
+                    "when_text": time_ago(latest.generated, now),
+                }
+        shown = interests if interests is not None else (conf.interests if conf else [])
         return page(
             "index.html",
             request,
@@ -304,11 +525,14 @@ def create_app(
             conf=conf,
             problem=problem,
             digests=digests,
+            hero=hero,
+            colors=interest_colors([i.name for i in shown]),
             interests=interests if interests is not None else (conf.interests if conf else []),
             interests_error=interests_error,
             interests_saved=request.query_params.get("saved") == "1",
             summary=interest_summary,
             empty_interest=EMPTY_INTEREST,
+            claude=account.status() if conf and conf.use_claude else None,
         )
 
     async def index(request: Request) -> Response:
@@ -378,19 +602,65 @@ def create_app(
         runner.start(conf, options)  # if one is already running, just show it
         return RedirectResponse("/run", status_code=303)
 
+    def job_status() -> dict[str, Any]:
+        job = runner.job
+        return {
+            "state": job.state,
+            "step": job.step,
+            "counts": dict(job.counts),
+            "claude_used": job.claude_used,
+            "lines": list(job.lines),
+            "digest_id": job.digest_id,
+            "message": job.message,
+        }
+
     async def run_page(request: Request) -> Response:
-        return page("run.html", request)
+        return page("run.html", request, job_status=job_status())
 
     async def run_status(request: Request) -> Response:
-        job = runner.job
-        return JSONResponse(
-            {
-                "state": job.state,
-                "lines": job.lines,
-                "digest_id": job.digest_id,
-                "message": job.message,
-            }
+        return JSONResponse(job_status())
+
+    async def font(request: Request) -> Response:
+        name = request.path_params["name"]
+        if not FONT_FILE.match(name):
+            return Response(status_code=404)
+        file = assets.joinpath("fonts", name)
+        if not file.is_file():
+            return Response(status_code=404)
+        return Response(
+            file.read_bytes(),
+            media_type="font/woff2",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
+
+    async def background(request: Request) -> Response:
+        setting = background_setting()
+        # The page always asks for /background?v=<content version>, so a cached
+        # copy can be kept indefinitely: a changed image gets a new URL.
+        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+        if setting == "none":
+            return Response(status_code=404)
+        if setting == "default":
+            return Response(bundled_background, media_type="image/jpeg", headers=headers)
+        path = Path(setting)
+        try:
+            data = path.read_bytes()
+        except OSError:  # a missing custom image falls back to the bundled one
+            return Response(bundled_background, media_type="image/jpeg", headers=headers)
+        media = cfg.BACKGROUND_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        return Response(data, media_type=media, headers=headers)
+
+    async def claude_status(request: Request) -> Response:
+        return JSONResponse(account.state())
+
+    async def claude_login_page(request: Request) -> Response:
+        return page("claude.html", request, state=account.state())
+
+    async def claude_login(request: Request) -> Response:
+        if not await check_csrf(request):
+            return Response("Invalid or missing form token; reload the page.", status_code=403)
+        account.start_login()
+        return RedirectResponse("/claude", status_code=303)
 
     async def settings_page(request: Request) -> Response:
         conf, problem = load_config()
@@ -398,6 +668,7 @@ def create_app(
         return page(
             "settings.html",
             request,
+            claude=account.status(),
             form=form,
             groups=_category_groups(set(form.categories)),
             models=MODEL_CHOICES,
@@ -423,6 +694,7 @@ def create_app(
                 "settings.html",
                 request,
                 422,
+                claude=account.status(),
                 form=form,
                 groups=_category_groups(set(form.categories)),
                 models=MODEL_CHOICES,
@@ -441,6 +713,11 @@ def create_app(
             Route("/run", start_run, methods=["POST"]),
             Route("/run", run_page, methods=["GET"]),
             Route("/run/status", run_status),
+            Route("/background", background),
+            Route("/fonts/{name}", font),
+            Route("/claude", claude_login_page, methods=["GET"]),
+            Route("/claude/login", claude_login, methods=["POST"]),
+            Route("/claude/status", claude_status),
             Route("/settings", settings_page, methods=["GET"]),
             Route("/settings", save_settings, methods=["POST"]),
         ],
@@ -449,5 +726,6 @@ def create_app(
         ],
     )
     app.state.runner = runner
+    app.state.account = account
     app.state.csrf = csrf_token
     return app

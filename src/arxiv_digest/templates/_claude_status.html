@@ -1,0 +1,21 @@
+{% if claude %}
+  {% if claude.logged_in %}
+  <p class="claude-status ok">✓ {{ claude.describe() }}</p>
+  {% elif not claude.installed %}
+  <p class="claude-status warn">Claude Code isn't installed, so digests are ranked on this computer only, without Claude's picks and explanations. <a href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>, then reload this page.</p>
+  {% elif claude.logged_in is none %}
+  <p class="claude-status muted">Claude Code is installed, but its sign-in status couldn't be checked.</p>
+  {% else %}
+  <div class="claude-status warn">
+    <p>Claude Code isn't signed in, so digests are ranked on this computer only, without Claude's picks and explanations.</p>
+    {% if nested %}{# inside another form: forms can't nest, so link to the sign-in page #}
+    <a class="button primary" href="/claude">Sign in to Claude</a>
+    {% else %}
+    <form method="post" action="/claude/login">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="primary">Sign in to Claude</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endif %}

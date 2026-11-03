@@ -19,13 +19,13 @@ from pathlib import Path
 import numpy as np
 
 from .arxiv_api import ArxivClient, announcement_start
-from .claude_cli import ClaudeAnswer
+from .claude_cli import SIGN_IN_HINT, ClaudeAnswer
 from .config import Config
 from .digest import Digest, build_digest
 from .embed import Embedder, EmbeddingUnavailable
 from .html_render import standalone_page
 from .models import Paper
-from .rank import ClaudeError, Pick, Ranker, local_picks
+from .rank import ClaudeError, ClaudeNotSignedIn, Pick, Ranker, local_picks
 from .render import render_markdown
 from .shortlist import Candidate, score_papers, select_locally, shortlist
 from .store import Store
@@ -34,6 +34,13 @@ MARGIN = timedelta(days=2)
 EMBED_BATCH = 256
 
 Log = Callable[[str], None]
+# Progress for the web app's run tracker: (step, details). Steps in order are
+# "fetch" (done, total), "shortlist" (new), "claude" (shortlisted), "write".
+Progress = Callable[[str, dict], None]
+
+
+def _no_progress(step: str, details: dict) -> None:
+    pass
 
 
 @dataclass
@@ -114,6 +121,7 @@ def run_digest(
     ranker: Ranker | None = None,
     log: Log = print,
     now: datetime | None = None,
+    progress: Progress = _no_progress,
 ) -> RunResult:
     options = options or RunOptions()
     now = (now or datetime.now(UTC)).astimezone(UTC)
@@ -140,9 +148,13 @@ def run_digest(
     result = RunResult(window_start=start, window_end=now, notes=notes)
 
     log(f"Fetching new papers in {', '.join(config.categories)} from arXiv…")
-    papers = client.search(
-        config.categories, start, now, progress=lambda done, total: log(f"  {done}/{total}")
-    )
+    progress("fetch", {"done": 0, "total": None})
+
+    def fetched(done: int, total: int) -> None:
+        log(f"  {done}/{total}")
+        progress("fetch", {"done": done, "total": total})
+
+    papers = client.search(config.categories, start, now, progress=fetched)
     result.fetched = len(papers)
 
     seen = set() if options.include_seen else store.seen_ids(p.id for p in papers)
@@ -159,6 +171,7 @@ def run_digest(
             store.finish_run(run_id, fetched=result.fetched, new=0, picked=0, digest_path=None)
         return result
 
+    progress("shortlist", {"new": len(new), "fetched": result.fetched})
     vectors = queries = None
     if embedder is not None and options.use_embeddings:
         try:
@@ -179,15 +192,24 @@ def run_digest(
         select_locally(result.shortlisted, config.max_papers, config.min_zscore)
     )
     if ranker is not None and options.use_claude and result.shortlisted:
+        not_signed_in = (
+            "Claude Code isn't signed in, so papers were chosen on this computer only."
+            f" {SIGN_IN_HINT}"
+        )
         if not ranker.available():
             notes.append(
                 "Claude Code (`claude`) wasn't found, so papers were chosen on this computer"
                 " only. Install Claude Code to get Claude's picks and explanations."
             )
+        elif ranker.signed_in() is False:
+            notes.append(not_signed_in)
         else:
             log(f"Asking {ranker.label} to choose from {len(result.shortlisted)} papers…")
+            progress("claude", {"shortlisted": len(result.shortlisted)})
             try:
                 ranked = ranker.rank(config, result.shortlisted)
+            except ClaudeNotSignedIn:
+                notes.append(not_signed_in)
             except ClaudeError as exc:
                 notes.append(f"Claude couldn't rank the papers ({exc}); showing the local ranking.")
             else:
@@ -203,6 +225,7 @@ def run_digest(
                     " followed authors."
                 )
 
+    progress("write", {"picked": len(result.picks)})
     result.digest = build_digest(
         config=config,
         picks=result.picks,
@@ -237,7 +260,11 @@ def run_digest(
 
 
 def run_with_config(
-    config: Config, options: RunOptions | None = None, *, log: Log = print
+    config: Config,
+    options: RunOptions | None = None,
+    *,
+    log: Log = print,
+    progress: Progress = _no_progress,
 ) -> RunResult:
     """Set up the real arXiv client, local model and Claude, then run (CLI and web app)."""
     from . import paths
@@ -258,7 +285,9 @@ def run_with_config(
         cli = ClaudeCLI(config.claude_command, config.claude_model, timeout=config.claude_timeout)
         ranker = ClaudeRanker(cli)
     try:
-        return run_digest(config, store, client, embedder, options, ranker=ranker, log=log)
+        return run_digest(
+            config, store, client, embedder, options, ranker=ranker, log=log, progress=progress
+        )
     finally:
         client.close()
         store.close()

@@ -1,56 +1,101 @@
-/* arxiv-digest: the digest view, shared by the HTML files and the web app. */
+/* arxiv-digest: the digest view, shared by the HTML files and the web app.
+   The web app adds fonts.css (bundled fonts) and app.css (glass panels etc.);
+   standalone HTML files fall back to system fonts if these aren't installed. */
 :root {
   --bg: #fbfaf8; --fg: #1f2328; --muted: #656d76; --card: #ffffff; --border: #e4e0d9;
   --accent: #b05a24; --accent-soft: #f5e8de; --link: #1f5fbf; --why: #f1f5fb;
+  --teal: #2a8c98; --tag: var(--accent);
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Space Grotesk", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #111214; --fg: #e6e6e3; --muted: #9aa0a6; --card: #1a1b1e; --border: #2d2f34;
-    --accent: #e3925a; --accent-soft: #2f2219; --link: #8ab4f8; --why: #18202b;
+    --accent: #e3925a; --accent-soft: #2f2219; --link: #8ab4f8; --why: #18202b; --teal: #4fc1c9;
   }
 }
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
-  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font: 16px/1.6 var(--font-ui); font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
 }
-.digest { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
-.digest h1 { font-size: 1.7rem; margin: 0 0 .35rem; }
+.digest { max-width: 880px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+.digest h1, .digest h2, .digest h3 { font-family: var(--font-display); letter-spacing: -.01em; }
+.digest h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 .5rem; }
 .stats { color: var(--muted); margin: .15rem 0; }
 .ranked-by { color: var(--muted); font-size: .9rem; margin: .15rem 0 1rem; }
 .note {
   border-left: 3px solid var(--accent); background: var(--accent-soft);
-  padding: .5rem .8rem; border-radius: 4px; margin: .6rem 0;
+  padding: .5rem .8rem; border-radius: 6px; margin: .6rem 0;
 }
 .digest h2 {
-  font-size: 1.25rem; margin: 2.2rem 0 .8rem; padding-bottom: .3rem;
-  border-bottom: 1px solid var(--border);
+  font-size: 1.3rem; margin: 2.4rem 0 .9rem; padding-bottom: .35rem;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: .55rem;
 }
-.digest h2 .count { color: var(--muted); font-weight: normal; }
+.digest h2 .count { color: var(--muted); font-weight: normal; font-family: var(--font-mono); font-size: .9rem; }
+.digest h2 .dot {
+  width: .62rem; height: .62rem; border-radius: 50%; background: var(--tag); flex: none;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tag) 70%, transparent);
+}
+
+/* Paper cards */
 .paper {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-  padding: 1rem 1.2rem; margin: 0 0 1rem;
+  position: relative; background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 1.05rem 1.25rem; margin: 0 0 1rem;
+  transition: transform .18s ease, box-shadow .18s ease;
 }
-.paper.top { border-left: 4px solid var(--accent); }
-.paper h3 { font-size: 1.08rem; line-height: 1.35; margin: 0 0 .35rem; }
+.paper:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .18), 0 0 0 1px color-mix(in srgb, var(--tag) 45%, transparent);
+}
+.paper.top::after {  /* a light-trail accent along the left edge of top picks */
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 3px;
+  background: linear-gradient(180deg, var(--accent), var(--teal));
+}
+.paper.has-gauge h3 { padding-right: 3.2rem; }
+.paper h3 { font-size: 1.12rem; line-height: 1.35; margin: 0 0 .4rem; font-weight: 600; }
 .paper h3 a { color: var(--fg); text-decoration: none; }
-.paper h3 a:hover { color: var(--link); text-decoration: underline; }
-.paper .num { color: var(--accent); margin-right: .3rem; }
-.meta { font-size: .88rem; color: var(--muted); margin: .15rem 0; }
-.meta a { color: var(--link); }
-.authors { font-size: .92rem; margin: .25rem 0 .5rem; }
+.paper h3 a:hover { color: var(--link); }
+.paper .num { color: var(--accent); margin-right: .3rem; font-family: var(--font-mono); font-weight: 500; }
+.meta { font-size: .86rem; color: var(--muted); margin: .15rem 0; }
+.meta a { color: var(--link); text-decoration: none; }
+.meta a:hover { text-decoration: underline; }
+.meta .arxiv-id { font-family: var(--font-mono); font-size: .82rem; }
+.authors { font-size: .92rem; margin: .3rem 0 .6rem; }
 .authors .followed { font-weight: 600; color: var(--accent); }
-.why { background: var(--why); border-radius: 6px; padding: .55rem .75rem; margin: .5rem 0; }
-.matched { font-size: .82rem; color: var(--muted); margin: .4rem 0; }
-.tag {
-  display: inline-block; background: var(--accent-soft); color: var(--accent);
-  border-radius: 999px; padding: 0 .55rem; font-size: .78rem; font-weight: 600;
+.why {
+  background: var(--why); border-radius: 8px; padding: .6rem .85rem; margin: .55rem 0;
+  border-left: 3px solid var(--teal);
 }
+.matched { font-size: .8rem; color: var(--muted); margin: .45rem 0; }
+.tag {
+  display: inline-block; border-radius: 999px; padding: .02rem .6rem; font-size: .76rem;
+  font-weight: 600; color: color-mix(in srgb, var(--tag) 72%, var(--fg));
+  background: color-mix(in srgb, var(--tag) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tag) 40%, transparent);
+}
+.gauge {
+  position: absolute; top: .85rem; right: .95rem; width: 2.5rem; height: 2.5rem;
+  display: grid; place-items: center;
+}
+.gauge svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.gauge circle { fill: none; stroke-width: 3; }
+.gauge .gauge-track { stroke: color-mix(in srgb, var(--muted) 25%, transparent); }
+.gauge .gauge-fill {
+  stroke: var(--accent); stroke-linecap: round;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+.gauge span { font-family: var(--font-mono); font-size: .8rem; font-weight: 600; color: var(--fg); }
 .paper details { margin-top: .4rem; }
-.paper summary { cursor: pointer; color: var(--muted); font-size: .88rem; }
+.paper summary { cursor: pointer; color: var(--muted); font-size: .86rem; }
 .paper details p { margin: .5rem 0 0; }
 .empty { color: var(--muted); font-style: italic; }
 .digest footer {
   margin-top: 2.5rem; padding-top: .8rem; border-top: 1px solid var(--border);
-  color: var(--muted); font-size: .82rem;
+  color: var(--muted); font-size: .8rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .paper, .paper:hover { transition: none; transform: none; }
 }

@@ -347,12 +347,16 @@ def status(config: ConfigOption = None) -> None:
                 f"[bold]Interests[/bold]  {escape(', '.join(i.name for i in conf.interests))}"
             )
             if conf.use_claude:
-                found = ClaudeCLI(conf.claude_command, conf.claude_model).available()
-                state = "ready" if found else "not found, so papers are ranked locally"
+                claude = ClaudeCLI(conf.claude_command, conf.claude_model).status()
+                colour = "green" if claude.logged_in else "yellow"
                 out.print(
-                    f"[bold]Claude[/bold]     {escape(conf.claude_model)} via"
-                    f" `{escape(conf.claude_command)}` ({state})"
+                    f"[bold]Claude[/bold]     [{colour}]{escape(claude.describe())}[/{colour}]"
+                    f" · model {escape(conf.claude_model)}"
                 )
+                if claude.installed and claude.logged_in is False:
+                    out.print("           Sign in with [bold]claude auth login[/bold]")
+                elif not claude.installed:
+                    out.print("           Install it from https://claude.com/claude-code")
             else:
                 out.print("[bold]Claude[/bold]     off (use_claude = false)")
         except cfg.ConfigError as exc:

@@ -99,6 +99,7 @@ Less common settings, with their defaults:
 | `claude_command` | `"claude"` | The command that runs Claude Code, if it isn't `claude` on your PATH |
 | `claude_timeout` | `600` | Seconds to wait for Claude before falling back to the local ranking |
 | `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | The local model. `BAAI/bge-small-en-v1.5` ranks slightly better but uses about 4× the CPU. |
+| `app_background` | `"default"` | The web app's background: `"default"`, `"none"`, or a path to your own image |
 | `allow_unknown_categories` | `false` | Allow category codes that aren't in the bundled list, e.g. one arXiv added recently |
 
 ## How ranking works
@@ -109,6 +110,8 @@ Less common settings, with their defaults:
 4. **Pick.** Claude reads the shortlist and your interests and keeps only the papers that are genuinely relevant: at most `max_papers`, best first, and none on a quiet day. For each one it writes a short "why" and a 1–10 relevance score. Followed-author papers are always kept.
    - It runs through the Claude Code CLI (`claude -p`) with your own Claude sign-in, so no API key is needed. Each call is isolated: no tools, no saved session, and your Claude Code settings and hooks aren't loaded. The answer must match a JSON schema, and arxiv-digest checks it before use.
    - In testing, one call on a 35-paper shortlist took a few seconds.
+   - **Signing in:** arxiv-digest never handles your Claude login. The `claude` command uses the sign-in Claude Code already stored when you signed in once (`claude auth login`, or `/login` inside Claude Code). `arxiv-digest status` and the web app show whether you're signed in. That check runs `claude auth status` and uses none of your Claude usage.
+   - **If you're not signed in,** runs skip Claude with a note saying how to sign in, and the web app shows a **Sign in to Claude** button. The button runs `claude auth login`, which opens Claude's sign-in page in your browser.
    - If Claude Code isn't installed, or the call fails, the digest falls back to the local rule (a followed author, a keyword hit, or similarity well above the day's average) and says so at the top.
 
 **What leaves your computer:** requests to arXiv; the one-time model download from Hugging Face; and, when Claude is used, your interests plus the shortlisted titles, authors and abstracts, sent to Anthropic through Claude Code. With `--no-claude`, ranking stays entirely on your computer.
@@ -136,10 +139,12 @@ uv run ruff check . && uv run ruff format --check .
 
 `arxiv-digest app` starts a small web server on your computer and opens it in your browser:
 
-- **Start page:** your interests, one line each. Click one to edit it in place, or add a new one. **Save interests** saves them; **Save and re-run the latest announcement** saves them and shows today's papers again, chosen for the updated interests.
+- **Start page:** a greeting with your latest digest's numbers (new, shortlisted, picked) and a **Run today's digest** button. Below it, your interests appear as coloured chips: click one to edit it in a side panel, or click **+ Add interest**. **Save** keeps the changes; **Save and re-run latest announcement** also shows today's papers again, chosen for the updated interests.
 - **Digests:** every digest you've made, newest first. Each one opens in the same layout as the HTML file, with older/newer links.
-- **Run:** run today's digest from a button, with optional settings to include papers already shown or to skip Claude. Progress appears live, and the new digest opens when it finishes.
+- **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away.
 - **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, and set the digest size and Claude model. Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
+
+**Background:** the app shows a night-sky image behind dark, translucent panels: a dark indigo sky with a soft copper and teal light trail. Set `app_background = "none"` in the config to turn it off, or point it at your own `.jpg`, `.png` or `.webp` file. The image is original artwork drawn entirely by code (`tools/make_background.py`, no photos involved). Regenerate it, or try another seed, with `uv run --with pillow python tools/make_background.py src/arxiv_digest/assets/background.jpg 12`.
 
 The server only listens on `127.0.0.1`. It rejects requests addressed to any other host name, which blocks DNS-rebinding attacks from other sites open in your browser. Every form also carries a random token, so other websites can't submit changes for you. Stop it with Ctrl+C.
 
@@ -154,4 +159,6 @@ The server only listens on `127.0.0.1`. It rejects requests addressed to any oth
 
 ## License
 
-[MIT](LICENSE) © 2026 Matt Wiemann
+[MIT](LICENSE) © 2026 Matt Wiemann.
+
+The web app bundles the fonts [Inter](https://rsms.me/inter/), [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and [JetBrains Mono](https://www.jetbrains.com/lp/mono/), each under the [SIL Open Font License 1.1](src/arxiv_digest/assets/fonts/).
