@@ -17,6 +17,7 @@ from typing import Any, Protocol
 
 from .claude_cli import ClaudeAnswer, ClaudeCLI, ClaudeError, ClaudeNotSignedIn
 from .config import Config, Interest
+from .models import DeepRead
 from .shortlist import Candidate
 
 MAX_WHY = 600
@@ -30,6 +31,7 @@ class Pick:
     interest: str  # the interest the paper is filed under
     why: str | None = None  # Claude's explanation
     relevance: int | None = None  # Claude's 1-10 score
+    deep_read: DeepRead | None = None  # Claude's full-text summary (top picks)
 
 
 def local_picks(candidates: Sequence[Candidate]) -> list[Pick]:

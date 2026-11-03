@@ -187,6 +187,10 @@ def run(
         bool,
         typer.Option("--no-claude", help="Choose papers on this computer only (no Claude)."),
     ] = False,
+    no_deep_read: Annotated[
+        bool,
+        typer.Option("--no-deep-read", help="Skip Claude's full-text read of the top picks."),
+    ] = False,
     no_open: Annotated[
         bool, typer.Option("--no-open", help="Don't open the HTML digest in the browser.")
     ] = False,
@@ -202,6 +206,7 @@ def run(
         dry_run=dry_run,
         use_embeddings=not no_model,
         use_claude=conf.use_claude and not no_claude,
+        deep_read=not no_deep_read,
     )
     try:
         result = run_with_config(

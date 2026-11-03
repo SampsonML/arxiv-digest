@@ -7,6 +7,7 @@ papers      full metadata of recent papers (pruned after `retention_days`),
 embeddings  cached embedding vectors, keyed by paper and model
 runs        one row per run, for `status` and for working out what is new
 digests     every digest produced, as data, for the HTML views and web app
+deep_reads  Claude's full-text summaries, so a paper is never read twice
 """
 
 from __future__ import annotations
@@ -20,9 +21,9 @@ from pathlib import Path
 import numpy as np
 
 from .digest import Digest
-from .models import Paper
+from .models import DeepRead, Paper
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen (
@@ -51,6 +52,13 @@ CREATE TABLE IF NOT EXISTS digests (
     markdown_path TEXT,
     html_path TEXT,
     data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deep_reads (
+    paper_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created TEXT NOT NULL,
+    PRIMARY KEY (paper_id, key)
 );
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,6 +228,22 @@ class Store:
         if row is None:
             return None
         return Digest.from_dict(json.loads(row["data"])), row
+
+    # -- deep reads ---------------------------------------------------------
+
+    def get_deep_read(self, paper_id: str, key: str) -> DeepRead | None:
+        row = self.db.execute(
+            "SELECT data FROM deep_reads WHERE paper_id = ? AND key = ?", (paper_id, key)
+        ).fetchone()
+        return DeepRead.from_dict(json.loads(row[0])) if row else None
+
+    def put_deep_read(self, paper_id: str, key: str, read: DeepRead) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO deep_reads (paper_id, key, data, created)"
+                " VALUES (?, ?, ?, ?)",
+                (paper_id, key, json.dumps(read.to_dict()), _iso(datetime.now(UTC))),
+            )
 
     # -- housekeeping -------------------------------------------------------
 

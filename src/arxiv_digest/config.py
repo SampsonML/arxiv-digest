@@ -30,6 +30,8 @@ TOP_LEVEL_KEYS = {
     "claude_model",
     "claude_command",
     "claude_timeout",
+    "deep_reads",
+    "deep_read_model",
     "app_background",
     "interest",
 }
@@ -82,6 +84,8 @@ class Config:
     claude_model: str = "sonnet"
     claude_command: str = "claude"
     claude_timeout: float = 600.0
+    deep_reads: int = 3  # top picks Claude reads in full (0: none)
+    deep_read_model: str = "sonnet"
     app_background: str = "default"  # "default", "none", or a path to an image
 
 
@@ -216,8 +220,18 @@ def parse(text: str, path: Path) -> Config:
         claude_model=claude_model.strip(),
         claude_command=claude_command.strip(),
         claude_timeout=float(_number(data, "claude_timeout", 600, 30, 3600)),
+        deep_reads=int(_number(data, "deep_reads", 3, 0, 10)),
+        deep_read_model=_model_name(data.get("deep_read_model", claude_model), "deep_read_model"),
         app_background=_background(data.get("app_background", "default"), path),
     )
+
+
+def _model_name(value: Any, key: str) -> str:
+    _expect(
+        isinstance(value, str) and value.strip() != "",
+        f'`{key}` must be a model name or alias, e.g. "sonnet"',
+    )
+    return value.strip()
 
 
 BACKGROUND_TYPES = {
@@ -300,6 +314,11 @@ def render_template(
         "use_claude = true",
         '# "sonnet" (default), "haiku" (faster, lighter) or "opus" (most thorough).',
         'claude_model = "sonnet"',
+        "",
+        "# Claude reads the full text of this many top picks and summarises their",
+        "# method and results (0 turns it off). Uses claude_model unless set here.",
+        "deep_reads = 3",
+        '# deep_read_model = "sonnet"',
         "",
         '# Background of `arxiv-digest app`: "default" (a night-sky image),',
         '# "none", or the path to your own .jpg/.png/.webp image.',

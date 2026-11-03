@@ -42,6 +42,36 @@ def _digest(**overrides):
     return Digest(**values)
 
 
+def _with_deep_read():
+    from arxiv_digest.models import DeepRead
+
+    digest = _digest()
+    first = digest.entries[0]
+    digest.entries[0] = Entry(
+        first.paper,
+        first.interest,
+        first.why,
+        first.relevance,
+        first.followed_authors,
+        first.evidence,
+        DeepRead("Trains <b>an</b> emulator.", "1% error.", "Faster sims.", "PDF", True),
+    )
+    return digest
+
+
+def test_deep_read_views_and_round_trip():
+    digest = _with_deep_read()
+    assert Digest.from_dict(digest.to_dict()) == digest
+    md = render_markdown(digest)
+    assert "**Deep read** · *Claude read the full text (PDF, cut short)*" in md
+    assert "- **Method:** Trains &lt;b>an&lt;/b> emulator." in md
+    assert "- **Why it matters:** Faster sims." in md
+    body = digest_body(digest)
+    assert '<span class="badge">Deep read</span>' in body
+    assert "<dt>Results</dt><dd>1% error.</dd>" in body
+    assert "Trains &lt;b&gt;an&lt;/b&gt; emulator." in body  # escaped
+
+
 def test_round_trip_through_dict():
     digest = _digest()
     again = Digest.from_dict(digest.to_dict())

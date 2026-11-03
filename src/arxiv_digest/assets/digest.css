@@ -99,3 +99,22 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .paper, .paper:hover { transition: none; transform: none; }
 }
+
+/* Deep read: Claude's full-text summary on top picks */
+.deep-read {
+  margin: .7rem 0 .4rem; padding: .7rem .95rem .5rem; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent),
+    color-mix(in srgb, var(--teal) 7%, transparent));
+}
+.deep-head { margin: 0 0 .45rem; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+.deep-read .badge {
+  font-family: var(--font-mono); font-size: .7rem; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; padding: .1rem .5rem; border-radius: 999px; color: var(--bg);
+  background: linear-gradient(120deg, var(--accent), var(--teal));
+}
+.deep-read .src { color: var(--muted); font-size: .8rem; }
+.deep-read dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: .35rem .9rem; }
+.deep-read dt { font-weight: 600; font-size: .86rem; color: var(--accent); padding-top: .05rem; }
+.deep-read dd { margin: 0; font-size: .94rem; }
+@media (max-width: 640px) { .deep-read dl { grid-template-columns: 1fr; } .deep-read dd { margin-bottom: .3rem; } }

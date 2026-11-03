@@ -14,7 +14,15 @@ from html import escape
 from importlib import resources
 
 from .digest import Digest, Entry
-from .render import MAX_AUTHORS, author_list, evidence_parts, footer_text, short_comment, stats_text
+from .render import (
+    MAX_AUTHORS,
+    author_list,
+    deep_read_source,
+    evidence_parts,
+    footer_text,
+    short_comment,
+    stats_text,
+)
 
 KATEX_VERSION = "0.19.1"
 _KATEX = f"https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist"
@@ -121,6 +129,19 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
     ]
     if entry.why:
         parts.append(f'<p class="why"><strong>Why:</strong> {_e(entry.why)}</p>')
+    if entry.deep_read:
+        read = entry.deep_read
+        parts += [
+            '<div class="deep-read">',
+            '<p class="deep-head"><span class="badge">Deep read</span>'
+            f' <span class="src">{_e(deep_read_source(entry))}</span></p>',
+            "<dl>",
+            f"<dt>Method</dt><dd>{_e(read.method)}</dd>",
+            f"<dt>Results</dt><dd>{_e(read.results)}</dd>",
+            f"<dt>Why it matters</dt><dd>{_e(read.why)}</dd>",
+            "</dl>",
+            "</div>",
+        ]
     # The gauge shows the relevance score, so the text line leaves it out.
     evidence = evidence_parts(
         entry.evidence, entry.interest, None, with_interest=number is not None

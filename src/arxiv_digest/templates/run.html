@@ -14,6 +14,7 @@
       <li data-step="fetch"><span class="step-name"><span class="marker"></span>Fetch</span><span class="count"></span></li>
       <li data-step="shortlist"><span class="step-name"><span class="marker"></span>Shortlist</span><span class="count"></span></li>
       <li data-step="claude"><span class="step-name"><span class="marker"></span>Claude</span><span class="count"></span></li>
+      <li data-step="deep_read"><span class="step-name"><span class="marker"></span>Deep read</span><span class="count"></span></li>
       <li data-step="done"><span class="step-name"><span class="marker"></span>Done</span><span class="count"></span></li>
     </ol>
     <div class="bar"><div class="fill"></div></div>
@@ -34,7 +35,7 @@
 {% if job.state != 'idle' %}
 <script>
 (function () {
-  const ORDER = ["fetch", "shortlist", "claude", "done"];
+  const ORDER = ["fetch", "shortlist", "claude", "deep_read", "done"];
   const tracker = document.getElementById("tracker");
   const fill = tracker.querySelector(".bar .fill");
   const log = document.getElementById("log");
@@ -46,18 +47,21 @@
     const c = job.counts || {};
     const finished = job.state === "done";
     const failed = job.state === "error";
-    let active = job.step === "write" ? 3 : Math.max(0, ORDER.indexOf(job.step));
-    if (finished) active = 4;
+    let active = job.step === "write" ? 4 : Math.max(0, ORDER.indexOf(job.step));
+    if (finished) active = 5;
     const claudeSkipped = !job.claude_used && (finished || active >= 3);
+    const deepSkipped = !job.deep_used && (finished || active >= 4);
     tracker.className = "card tracker " + job.state;
     tracker.querySelectorAll(".steps li").forEach(function (li, i) {
       li.className = i < active ? "done" : i === active ? (failed ? "active failed" : "active") : "";
       if (li.dataset.step === "claude" && claudeSkipped) li.className = "skipped";
+      if (li.dataset.step === "deep_read" && deepSkipped) li.className = "skipped";
     });
     const counts = {
       fetch: c.total ? n(c.fetched) + " / " + n(c.total) : c.fetched ? n(c.fetched) + " papers" : "",
       shortlist: c.new !== undefined ? n(c.new) + " new" + (c.shortlisted !== undefined ? " → " + n(c.shortlisted) : "") : "",
       claude: claudeSkipped ? "skipped" : c.shortlisted !== undefined && job.claude_used ? (active > 2 ? "read " : "reading ") + n(c.shortlisted) : "",
+      deep_read: deepSkipped ? "skipped" : job.deep_used ? (active > 3 ? "read " : "reading ") + n(c.deep) + " in full" : "",
       done: finished ? n(c.picked) + " picked" : job.step === "write" ? "saving…" : ""
     };
     tracker.querySelectorAll(".steps li").forEach(function (li) {
@@ -66,8 +70,9 @@
     let pct = 4;
     if (job.step === "fetch" && c.total) pct = 5 + 25 * (c.fetched || 0) / c.total;
     else if (job.step === "shortlist") pct = 42;
-    else if (job.step === "claude") pct = 70;
-    else if (job.step === "write") pct = 92;
+    else if (job.step === "claude") pct = 62;
+    else if (job.step === "deep_read") pct = 80;
+    else if (job.step === "write") pct = 94;
     if (finished) pct = 100;
     fill.style.width = pct + "%";
     log.textContent = job.lines.join("\n");

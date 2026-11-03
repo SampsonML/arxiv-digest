@@ -12,7 +12,7 @@ Which papers count as new:
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +21,7 @@ import numpy as np
 from .arxiv_api import ArxivClient, announcement_start
 from .claude_cli import SIGN_IN_HINT, ClaudeAnswer
 from .config import Config
+from .deepread import DeepReader
 from .digest import Digest, build_digest
 from .embed import Embedder, EmbeddingUnavailable
 from .html_render import standalone_page
@@ -35,7 +36,8 @@ EMBED_BATCH = 256
 
 Log = Callable[[str], None]
 # Progress for the web app's run tracker: (step, details). Steps in order are
-# "fetch" (done, total), "shortlist" (new), "claude" (shortlisted), "write".
+# "fetch" (done, total), "shortlist" (new), "claude" (shortlisted),
+# "deep_read" (papers), "write" (picked).
 Progress = Callable[[str, dict], None]
 
 
@@ -50,6 +52,7 @@ class RunOptions:
     dry_run: bool = False  # print only: write no file and remember nothing
     use_embeddings: bool = True
     use_claude: bool = True
+    deep_read: bool = True
 
 
 @dataclass
@@ -119,6 +122,7 @@ def run_digest(
     options: RunOptions | None = None,
     *,
     ranker: Ranker | None = None,
+    deep_reader: DeepReader | None = None,
     log: Log = print,
     now: datetime | None = None,
     progress: Progress = _no_progress,
@@ -225,6 +229,17 @@ def run_digest(
                     " followed authors."
                 )
 
+    deep_count = min(config.deep_reads, config.top_picks)
+    if deep_reader is not None and options.deep_read and result.claude is not None and deep_count:
+        top = result.picks[:deep_count]
+        if top:
+            progress("deep_read", {"papers": len(top)})
+            log(f"Reading the full text of the top {len(top)} picks…")
+            reads, read_notes = deep_reader.read(config, top, store, log)
+            notes.extend(read_notes)
+            result.picks = [
+                replace(p, deep_read=reads.get(p.candidate.paper.id)) for p in result.picks
+            ]
     progress("write", {"picked": len(result.picks)})
     result.digest = build_digest(
         config=config,
@@ -280,14 +295,32 @@ def run_with_config(
         if options.use_embeddings
         else None
     )
-    ranker = None
+    ranker = deep_reader = fetcher = None
     if options.use_claude and config.use_claude:
         cli = ClaudeCLI(config.claude_command, config.claude_model, timeout=config.claude_timeout)
         ranker = ClaudeRanker(cli)
+        if options.deep_read and config.deep_reads:
+            from .fulltext import FullTextFetcher
+
+            fetcher = FullTextFetcher()
+            reader_cli = ClaudeCLI(
+                config.claude_command, config.deep_read_model, timeout=config.claude_timeout
+            )
+            deep_reader = DeepReader(reader_cli, fetcher.fetch)
     try:
         return run_digest(
-            config, store, client, embedder, options, ranker=ranker, log=log, progress=progress
+            config,
+            store,
+            client,
+            embedder,
+            options,
+            ranker=ranker,
+            deep_reader=deep_reader,
+            log=log,
+            progress=progress,
         )
     finally:
         client.close()
         store.close()
+        if fetcher is not None:
+            fetcher.close()

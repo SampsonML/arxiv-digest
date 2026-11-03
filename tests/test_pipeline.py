@@ -267,3 +267,84 @@ def test_sign_in_error_during_the_call_gets_the_same_note(tmp_path, make_config)
         now=NOW,
     )
     assert "isn't signed in" in result.markdown and "claude auth login" in result.markdown
+
+
+class FakeDeepReader:
+    label = "Claude (fake)"
+
+    def __init__(self):
+        self.asked = None
+
+    def read(self, config, picks, cache=None, log=None):
+        from arxiv_digest.models import DeepRead
+
+        self.asked = [p.candidate.paper.id for p in picks]
+        reads = {
+            pid: DeepRead(f"Method of {pid}.", "Results.", "Matters.", "arXiv HTML")
+            for pid in self.asked[:1]
+        }
+        return reads, ["Couldn't deep-read “x”: HTTP 404."]
+
+
+def test_deep_read_of_top_picks(tmp_path, make_config):
+    config = make_config(top_picks=2, deep_reads=3)
+    store = Store(tmp_path / "db.sqlite3")
+    reader = FakeDeepReader()
+    result = run_digest(
+        config,
+        store,
+        FakeClient(_papers()),
+        FakeEmbedder(),
+        ranker=FakeRanker(choose=["2611.00002", "2611.00003", "2611.00001"]),
+        deep_reader=reader,
+        log=lambda m: None,
+        now=NOW,
+    )
+    assert reader.asked == ["2611.00002", "2611.00003"]  # only top picks (min of the two settings)
+    assert result.picks[0].deep_read.method == "Method of 2611.00002."
+    assert result.picks[1].deep_read is None
+    assert "**Deep read** · *Claude read the full text (arXiv HTML)*" in result.markdown
+    assert "- **Method:** Method of 2611.00002." in result.markdown
+    assert "HTTP 404" in result.markdown  # the failure note
+    assert 'class="deep-read"' in result.html
+    saved, _ = store.get_digest(result.digest_id)
+    assert saved.entries[0].deep_read.method == "Method of 2611.00002."
+
+
+def test_no_deep_read_without_claude_ranking_or_when_off(tmp_path, make_config):
+    config = make_config()
+    reader = FakeDeepReader()
+    run_digest(
+        config,
+        Store(tmp_path / "a.sqlite3"),
+        FakeClient(_papers()),
+        FakeEmbedder(),
+        ranker=FakeRanker(error="down"),
+        deep_reader=reader,
+        log=lambda m: None,
+        now=NOW,
+    )
+    assert reader.asked is None  # Claude couldn't rank, so no deep read either
+    run_digest(
+        config,
+        Store(tmp_path / "b.sqlite3"),
+        FakeClient(_papers()),
+        FakeEmbedder(),
+        RunOptions(deep_read=False),
+        ranker=FakeRanker(choose=["2611.00002"]),
+        deep_reader=reader,
+        log=lambda m: None,
+        now=NOW,
+    )
+    assert reader.asked is None
+
+
+def test_store_caches_deep_reads(tmp_path):
+    from arxiv_digest.models import DeepRead
+
+    store = Store(tmp_path / "db.sqlite3")
+    read = DeepRead("m", "r", "w", "PDF", True)
+    assert store.get_deep_read("2611.00001", "k") is None
+    store.put_deep_read("2611.00001", "k", read)
+    assert store.get_deep_read("2611.00001", "k") == read
+    assert store.get_deep_read("2611.00001", "other") is None

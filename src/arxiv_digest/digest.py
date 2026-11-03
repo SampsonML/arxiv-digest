@@ -14,7 +14,7 @@ from typing import Any
 
 from . import __version__
 from .config import Config
-from .models import Paper
+from .models import DeepRead, Paper
 from .rank import Pick
 
 
@@ -37,6 +37,7 @@ class Entry:
     relevance: int | None = None
     followed_authors: tuple[str, ...] = ()
     evidence: Evidence | None = None
+    deep_read: DeepRead | None = None
 
 
 @dataclass
@@ -106,6 +107,7 @@ class Digest:
                         "keywords": list(e.evidence.keywords),
                         "authors": list(e.evidence.authors),
                     },
+                    "deep_read": None if e.deep_read is None else e.deep_read.to_dict(),
                 }
                 for e in self.entries
             ],
@@ -132,6 +134,9 @@ class Digest:
                         keywords=tuple(ev.get("keywords", [])),
                         authors=tuple(ev.get("authors", [])),
                     ),
+                    deep_read=DeepRead.from_dict(item["deep_read"])
+                    if item.get("deep_read")
+                    else None,
                 )
             )
         return cls(
@@ -183,6 +188,7 @@ def build_digest(
                 relevance=pick.relevance,
                 followed_authors=candidate.followed_authors,
                 evidence=evidence,
+                deep_read=pick.deep_read,
             )
         )
     return Digest(

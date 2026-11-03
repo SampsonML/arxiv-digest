@@ -67,6 +67,7 @@ class Job:
     step: str = ""  # fetch | shortlist | claude | write (see pipeline.Progress)
     counts: dict[str, int | None] = field(default_factory=dict)
     claude_used: bool = False
+    deep_used: bool = False
 
 
 class _Reporter:
@@ -89,6 +90,9 @@ class _Reporter:
         elif name == "claude":
             job.counts["shortlisted"] = details.get("shortlisted")
             job.claude_used = True
+        elif name == "deep_read":
+            job.counts["deep"] = details.get("papers")
+            job.deep_used = True
         elif name == "write":
             job.counts["picked"] = details.get("picked")
 
@@ -354,6 +358,7 @@ class SettingsForm:
                     "top_picks": 3,
                     "use_claude": True,
                     "claude_model": "sonnet",
+                    "deep_reads": 3,
                 },
             )
         return cls(
@@ -365,6 +370,7 @@ class SettingsForm:
                 "top_picks": conf.top_picks,
                 "use_claude": conf.use_claude,
                 "claude_model": conf.claude_model,
+                "deep_reads": conf.deep_reads,
             },
         )
 
@@ -391,6 +397,7 @@ class SettingsForm:
                 "top_picks": number("top_picks", 3),
                 "use_claude": form.get("use_claude") == "on",
                 "claude_model": str(form.get("claude_model", "sonnet")).strip() or "sonnet",
+                "deep_reads": number("deep_reads", 3),
             },
         )
 
@@ -656,6 +663,7 @@ def create_app(
         options = RunOptions(
             include_seen=form.get("include_seen") == "on",
             use_claude=form.get("use_claude") == "on",  # unchecked boxes aren't sent
+            deep_read=form.get("deep_read") == "on",
         )
         runner.start(conf, options)  # if one is already running, just show it
         return RedirectResponse("/run", status_code=303)
@@ -667,6 +675,7 @@ def create_app(
             "step": job.step,
             "counts": dict(job.counts),
             "claude_used": job.claude_used,
+            "deep_used": job.deep_used,
             "lines": list(job.lines),
             "digest_id": job.digest_id,
             "message": job.message,

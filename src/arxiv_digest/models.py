@@ -68,3 +68,33 @@ class Paper:
             journal_ref=data.get("journal_ref", ""),
             doi=data.get("doi", ""),
         )
+
+
+@dataclass(frozen=True)
+class DeepRead:
+    """Claude's summary of a paper after reading its full text."""
+
+    method: str
+    results: str
+    why: str  # why it matters for the interest the paper is filed under
+    source: str  # where the text came from: "arXiv HTML" or "PDF"
+    truncated: bool = False  # the text was cut short to fit
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "results": self.results,
+            "why": self.why,
+            "source": self.source,
+            "truncated": self.truncated,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeepRead:
+        return cls(
+            method=data["method"],
+            results=data["results"],
+            why=data["why"],
+            source=data.get("source", ""),
+            truncated=bool(data.get("truncated", False)),
+        )

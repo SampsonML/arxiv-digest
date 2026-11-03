@@ -86,6 +86,25 @@ def _links(paper: Paper) -> str:
     return " · ".join(parts)
 
 
+def deep_read_source(entry: Entry) -> str:
+    read = entry.deep_read
+    assert read is not None
+    return f"Claude read the full text ({read.source}{', cut short' if read.truncated else ''})"
+
+
+def _deep_read(entry: Entry) -> list[str]:
+    read = entry.deep_read
+    assert read is not None
+    return [
+        f"**Deep read** · *{deep_read_source(entry)}*",
+        "",
+        f"- **Method:** {_safe(read.method)}",
+        f"- **Results:** {_safe(read.results)}",
+        f"- **Why it matters:** {_safe(read.why)}",
+        "",
+    ]
+
+
 def _entry(entry: Entry, heading: str, *, with_interest: bool) -> list[str]:
     paper = entry.paper
     lines = [
@@ -98,6 +117,8 @@ def _entry(entry: Entry, heading: str, *, with_interest: bool) -> list[str]:
     ]
     if entry.why:
         lines += [f"**Why:** {_safe(entry.why)}", ""]
+    if entry.deep_read:
+        lines += _deep_read(entry)
     parts = evidence_parts(
         entry.evidence, entry.interest, entry.relevance, with_interest=with_interest
     )

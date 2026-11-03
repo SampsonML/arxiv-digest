@@ -48,6 +48,9 @@
     <h2>Claude</h2>
     {% with nested = True %}{% include "_claude_status.html" %}{% endwith %}
     <label class="inline"><input type="checkbox" name="use_claude"{% if form.values.use_claude %} checked{% endif %}> Let Claude choose the final papers and explain each one (needs Claude Code)</label>
+    <label>Deep-read the top picks <span class="hint">Claude reads this many top papers in full and summarises their method and results (0 = off)</span>
+      <input type="number" name="deep_reads" min="0" max="10" value="{{ form.values.deep_reads }}">
+    </label>
     <label>Model
       <select name="claude_model">
         {% for m in models %}<option value="{{ m }}"{% if form.values.claude_model == m %} selected{% endif %}>{{ m }}{% if m == "sonnet" %} (recommended){% elif m == "haiku" %} (lighter){% elif m == "opus" %} (most thorough){% endif %}</option>{% endfor %}

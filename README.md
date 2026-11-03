@@ -9,9 +9,7 @@ You describe what you care about: keywords, a sentence or two about a research i
 
 Or run `arxiv-digest app` for the same thing in a browser window: browse past digests, run a new one, and edit your interests in forms.
 
-> **Status: v0.3.** A local model shortlists the day's papers, and Claude keeps only the genuinely relevant ones and explains why each was chosen. Every digest is written as Markdown and as HTML, and there's a local web app. Coming next:
-> - full-text summaries of the top picks
-> - an MCP server so Claude Desktop and Claude Code can use the digest directly
+> **Status: v0.4.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Every digest is written as Markdown and as HTML, and there's a local web app. Coming next: an MCP server so Claude Desktop and Claude Code can use the digest directly.
 
 ## Install
 
@@ -46,6 +44,7 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest run --days 3` | Cover the last 3 days of submissions (papers already shown are skipped) |
 | `arxiv-digest run --include-seen` | Redo the latest announcement, including papers already shown (useful after editing interests) |
 | `arxiv-digest run --no-claude` | Choose papers on this computer only, without Claude's picks and explanations |
+| `arxiv-digest run --no-deep-read` | Skip Claude's full-text read of the top picks |
 | `arxiv-digest run --no-model` | Rank by keywords and followed authors only (no local model) |
 | `arxiv-digest categories list [--all]` | Your categories, or every arXiv category |
 | `arxiv-digest categories add hep-th` | Watch another category (checked against arXiv's list) |
@@ -100,6 +99,8 @@ Less common settings, with their defaults:
 | `claude_model` | `"sonnet"` | `"sonnet"`, `"haiku"` (lighter) or `"opus"` (most thorough), or a full model name |
 | `claude_command` | `"claude"` | The command that runs Claude Code, if it isn't `claude` on your PATH |
 | `claude_timeout` | `600` | Seconds to wait for Claude before falling back to the local ranking |
+| `deep_reads` | `3` | How many top picks Claude reads in full (0 turns deep reads off; never more than `top_picks`) |
+| `deep_read_model` | same as `claude_model` | The model for deep reads, e.g. `"opus"` for the most thorough reading |
 | `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | The local model. `BAAI/bge-small-en-v1.5` ranks slightly better but uses about 4× the CPU. |
 | `app_background` | `"default"` | The web app's background: `"default"`, `"none"`, or a path to your own image |
 | `allow_unknown_categories` | `false` | Allow category codes that aren't in the bundled list, e.g. one arXiv added recently |
@@ -116,7 +117,19 @@ Less common settings, with their defaults:
    - **If you're not signed in,** runs skip Claude with a note saying how to sign in, and the web app shows a **Sign in to Claude** button. The button runs `claude auth login`, which opens Claude's sign-in page in your browser.
    - If Claude Code isn't installed, or the call fails, the digest falls back to the local rule (a followed author, a keyword hit, or similarity well above the day's average) and says so at the top.
 
-**What leaves your computer:** requests to arXiv; the one-time model download from Hugging Face; and, when Claude is used, your interests plus the shortlisted titles, authors and abstracts, sent to Anthropic through Claude Code. With `--no-claude`, ranking stays entirely on your computer.
+5. **Deep read.** For the top picks (3 by default), arxiv-digest downloads the full text. It uses arXiv's HTML version where there is one, which keeps the math as LaTeX, and otherwise the PDF's text, leaving out the references. Claude reads each paper and writes three short parts, shown in a "Deep read" panel on the paper's card:
+   - **Method:** what the authors did
+   - **Results:** what they found, with the key numbers
+   - **Why it matters:** why it matters for your interest, with the main caveat
+
+   Reads run in parallel and took about 20 seconds for three papers in testing. Each read is cached, so re-running a digest doesn't read the same paper twice. Very long papers are cut to about 120,000 characters. If a paper can't be downloaded or read, the digest says so and carries on.
+
+**What leaves your computer:**
+- requests to arXiv, including full-text downloads for deep reads
+- the one-time model download from Hugging Face
+- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read
+
+With `--no-claude`, ranking stays entirely on your computer.
 
 ## Where files live
 
@@ -177,7 +190,7 @@ The server only listens on `127.0.0.1`. It rejects requests addressed to any oth
 1. ✅ Core: config, fetching, local ranking, Markdown digest
 2. ✅ Claude ranking through the Claude Code CLI (`claude -p`): picks only relevant papers, up to the cap, with a "why it was chosen" line for each
 3. ✅ HTML digests (same content as the Markdown; math rendered with KaTeX) and the local web app
-4. Deep read: Claude reads the full text of the top picks and summarizes the method and results
+4. ✅ Deep read: Claude reads the full text of the top picks and summarises the method and results
 5. MCP server, so Claude can browse, search and explain your digest
 6. PyPI release and a Claude Code plugin
 

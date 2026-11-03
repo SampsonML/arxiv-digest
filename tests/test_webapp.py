@@ -568,3 +568,27 @@ def test_health_checks_do_not_count_as_activity(config_path):
     assert activity.idle_for() >= 500
     client.get("/heartbeat")
     assert activity.idle_for() < 5
+
+
+def test_deep_read_option_step_and_setting(config_path):
+    seen = {}
+
+    def run_with_deep(conf, options, log):
+        seen["deep"] = options.deep_read
+        log.step("claude", {"shortlisted": 35})
+        log.step("deep_read", {"papers": 3})
+        return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
+
+    client, app = _client(config_path, run=run_with_deep)
+    assert 'name="deep_read" checked' in client.get("/").text
+    client.post("/run", data={"csrf": TOKEN, "use_claude": "on"})  # deep read box unticked
+    app.state.runner.thread.join(5)
+    status = client.get("/run/status").json()
+    assert seen["deep"] is False
+    assert status["deep_used"] is True and status["counts"]["deep"] == 3
+    assert 'data-step="deep_read"' in client.get("/run").text
+
+    page = client.get("/settings").text
+    assert 'name="deep_reads"' in page and 'value="3"' in page
+    client.post("/settings", data=_form(deep_reads="1"))
+    assert cfg.load(config_path).deep_reads == 1
