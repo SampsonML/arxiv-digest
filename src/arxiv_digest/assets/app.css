@@ -278,3 +278,8 @@ body:not(.has-bg) .page > h1, body:not(.has-bg) .digest header { text-shadow: no
 .stopped-banner[hidden] { display: none; }
 .hero.stopped { text-align: center; padding: 2.6rem 1.5rem; margin-top: 12vh; }
 .stopped-icon { width: 88px; height: 88px; border-radius: 22px; margin-bottom: .6rem; box-shadow: 0 0 40px rgba(79, 193, 201, .3); }
+
+/* Claude account status line with its login button */
+.claude-status.ok { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .9rem; }
+.inline-form { display: inline-flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: 0; }
+a.button.small, button.small { padding: .28rem .7rem; font-size: .82rem; font-weight: 500; border-radius: 8px; }

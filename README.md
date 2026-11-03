@@ -113,8 +113,12 @@ Less common settings, with their defaults:
 4. **Pick.** Claude reads the shortlist and your interests and keeps only the papers that are genuinely relevant: at most `max_papers`, best first, and none on a quiet day. For each one it writes a short "why" and a 1–10 relevance score. Followed-author papers are always kept.
    - It runs through the Claude Code CLI (`claude -p`) with your own Claude sign-in, so no API key is needed. Each call is isolated: no tools, no saved session, and your Claude Code settings and hooks aren't loaded. The answer must match a JSON schema, and arxiv-digest checks it before use.
    - In testing, one call on a 35-paper shortlist took a few seconds.
-   - **Signing in:** arxiv-digest never handles your Claude login. The `claude` command uses the sign-in Claude Code already stored when you signed in once (`claude auth login`, or `/login` inside Claude Code). `arxiv-digest status` and the web app show whether you're signed in. That check runs `claude auth status` and uses none of your Claude usage.
-   - **If you're not signed in,** runs skip Claude with a note saying how to sign in, and the web app shows a **Sign in to Claude** button. The button runs `claude auth login`, which opens Claude's sign-in page in your browser.
+   - **Claude account only.** arxiv-digest uses your Claude account (a Claude subscription signed in to Claude Code) and never API keys or pay-as-you-go API credits:
+     - Claude Code normally prefers an API key found in the environment over your account sign-in, and bills that key's credits. So arxiv-digest removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and the Bedrock/Vertex/Foundry switches from the environment it runs Claude Code in. A key set for another tool can't cause "Credit balance is too low" errors.
+     - Only a Claude-account sign-in counts. An Anthropic Console (API billing) sign-in is treated as not signed in.
+   - **Logging in.** arxiv-digest never handles your login; Claude Code stores it. `arxiv-digest status` and the web app show which account is signed in. That check runs `claude auth status` and uses none of your Claude usage.
+     - The app has a **Log in to a Claude account** button beside the status, which runs `claude auth login --claudeai` and opens Claude's login page. Use it to sign in, or to switch accounts.
+     - When you're not signed in, runs skip Claude with a note saying how to log in.
    - If Claude Code isn't installed, or the call fails, the digest falls back to the local rule (a followed author, a keyword hit, or similarity well above the day's average) and says so at the top.
 
 5. **Deep read.** For the top picks (3 by default), arxiv-digest downloads the full text. It uses arXiv's HTML version where there is one, which keeps the math as LaTeX, and otherwise the PDF's text, leaving out the references. Claude reads each paper and writes three short parts, shown in a "Deep read" panel on the paper's card:

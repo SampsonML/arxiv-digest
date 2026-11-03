@@ -116,7 +116,8 @@ def test_status_signed_out_still_parses_output_despite_exit_code():
     runner = FakeRunner(stdout=json.dumps({"loggedIn": False, "authMethod": "none"}), returncode=1)
     status = _cli(runner).status()
     assert status.logged_in is False
-    assert status.describe() == "Claude Code is installed but not signed in"
+    assert status.describe() == "Claude Code is installed but not signed in to a Claude account"
+    assert status.ready is False
 
 
 def test_status_unknown_or_missing():
@@ -124,4 +125,44 @@ def test_status_unknown_or_missing():
     assert _cli(FakeRunner(exc=subprocess.TimeoutExpired("c", 1))).status().logged_in is None
     missing = ClaudeCLI("definitely-not-a-real-command-xyz", runner=FakeRunner())
     assert missing.status().installed is False
-    assert missing.login_command()[-2:] == ["auth", "login"]
+    assert missing.login_command()[-3:] == ["auth", "login", "--claudeai"]
+
+
+def test_api_keys_and_other_providers_are_never_passed_to_claude_code():
+    environ = {
+        "PATH": "/usr/bin",
+        "HOME": "/home/me",
+        "ANTHROPIC_API_KEY": "sk-ant-should-not-be-used",
+        "ANTHROPIC_AUTH_TOKEN": "tok",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "CLAUDE_CODE_USE_VERTEX": "1",
+    }
+    runner = FakeRunner(stdout=_envelope())
+    cli = ClaudeCLI(sys.executable, runner=runner, environ=environ)
+    cli.ask("s", "p", SCHEMA)
+    cli.status()
+    for _, kwargs in runner.calls:
+        env = kwargs["env"]
+        assert env["PATH"] == "/usr/bin" and env["HOME"] == "/home/me"
+        for name in (
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+        ):
+            assert name not in env
+
+
+def test_only_a_claude_account_counts_as_ready():
+    console = json.dumps({"loggedIn": True, "authMethod": "console", "email": "a@b.c"})
+    status = _cli(FakeRunner(stdout=console)).status()
+    assert status.logged_in is True and status.ready is False
+    assert "Anthropic Console (API billing)" in status.describe()
+    account = json.dumps({"loggedIn": True, "authMethod": "claude.ai"})
+    assert _cli(FakeRunner(stdout=account)).status().ready is True
+
+
+def test_credit_balance_errors_mean_no_claude_account():
+    runner = FakeRunner(stdout=_envelope(is_error=True, result="Credit balance is too low"))
+    with pytest.raises(ClaudeNotSignedIn, match="Claude account"):
+        _cli(runner).ask("s", "p", SCHEMA)

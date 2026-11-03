@@ -238,7 +238,8 @@ class ClaudeRanker:
         return self.cli.available()
 
     def signed_in(self) -> bool | None:
-        return self.cli.status().logged_in
+        """Signed in with a Claude account (API keys and Console sign-ins don't count)."""
+        return self.cli.status().ready
 
     def rank(self, config: Config, shortlisted: Sequence[Candidate]) -> RankResult:
         if not shortlisted:

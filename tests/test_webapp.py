@@ -36,7 +36,11 @@ class FakeAccount:
 
     def __init__(self, logged_in=True, installed=True):
         self.current = ClaudeStatus(
-            installed=installed, logged_in=logged_in, email="me@example.com", plan="max"
+            installed=installed,
+            logged_in=logged_in,
+            email="me@example.com",
+            plan="max",
+            method="claude.ai" if logged_in else None,
         )
         self.started = 0
         self.running = False
@@ -311,11 +315,14 @@ def test_start_page_remove_interest_and_errors(config_path):
 
 def test_start_page_shows_claude_sign_in_status(config_path):
     client, _ = _client(config_path)
-    assert "✓ Signed in to Claude as me@example.com (Max plan)" in client.get("/").text
+    page = client.get("/").text
+    assert "✓ Signed in to Claude as me@example.com (Max plan)" in page
+    assert ">Log in to a Claude account</button>" in page and 'action="/claude/login"' in page
 
     client, _ = _client(config_path, account=FakeAccount(logged_in=False))
     page = client.get("/").text
-    assert "isn't signed in" in page and 'action="/claude/login"' in page
+    assert "not signed in to a Claude account" in page and "never API keys" in page
+    assert ">Log in to your Claude account</button>" in page
 
     client, _ = _client(config_path, account=FakeAccount(installed=False, logged_in=None))
     assert "Install Claude Code" in client.get("/").text
@@ -324,7 +331,11 @@ def test_start_page_shows_claude_sign_in_status(config_path):
 def test_settings_links_to_sign_in_instead_of_nesting_a_form(config_path):
     client, _ = _client(config_path, account=FakeAccount(logged_in=False))
     page = client.get("/settings").text
-    assert '<a class="button primary" href="/claude">Sign in to Claude</a>' in page
+    assert '<a class="button primary" href="/claude">Log in to your Claude account</a>' in page
+    assert 'action="/claude/login"' not in page
+    client, _ = _client(config_path)
+    page = client.get("/settings").text
+    assert '<a class="button small" href="/claude">Log in to a Claude account</a>' in page
     assert 'action="/claude/login"' not in page
 
 
@@ -338,7 +349,7 @@ def test_sign_in_button_starts_claude_login(config_path):
     assert account.started == 1
     account.output = ["Opening https://claude.ai/oauth/authorize?code=1 in your browser"]
     page = client.get("/claude").text
-    assert "Finish signing in" in page
+    assert "Finish logging in" in page
     assert 'href="https://claude.ai/oauth/authorize?code=1"' in page
     status = client.get("/claude/status").json()
     assert status["login_running"] is True and status["logged_in"] is False
@@ -346,7 +357,9 @@ def test_sign_in_button_starts_claude_login(config_path):
 
 def test_sign_in_page_when_already_signed_in(config_path):
     client, _ = _client(config_path)
-    assert "Signed in to Claude as me@example.com" in client.get("/claude").text
+    page = client.get("/claude").text
+    assert "Signed in to Claude as me@example.com" in page
+    assert ">Log in to a different Claude account</button>" in page
 
 
 def test_sign_in_links_only_point_to_claude():
@@ -391,18 +404,20 @@ def test_claude_account_runs_login_in_the_background():
         return FakeProcess(["Opening https://claude.ai/oauth/authorize?x=1\n", "Done\n"])
 
     def status_runner(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, '{"loggedIn": true, "email": "a@b.c"}', "")
+        out = '{"loggedIn": true, "authMethod": "claude.ai", "email": "a@b.c"}'
+        return subprocess.CompletedProcess(argv, 0, out, "")
 
     account = ClaudeAccount(lambda: ClaudeCLI(sys.executable, runner=status_runner), popen=popen)
     assert account.start_login() is True
     argv, kwargs = started[0]
-    assert argv[-2:] == ["auth", "login"] and kwargs["stdin"] == subprocess.DEVNULL
+    assert argv[-3:] == ["auth", "login", "--claudeai"] and kwargs["stdin"] == subprocess.DEVNULL
+    assert "ANTHROPIC_API_KEY" not in kwargs["env"]
     for _ in range(200):  # the output is read by a background thread
         if account.process.poll() is not None:
             break
         time.sleep(0.01)
     state = account.state()
-    assert state["logged_in"] is True and state["email"] == "a@b.c"
+    assert state["logged_in"] is True and state["ready"] is True and state["email"] == "a@b.c"
     assert state["links"] == ["https://claude.ai/oauth/authorize?x=1"]
     assert state["output"][-1] == "Done"
 

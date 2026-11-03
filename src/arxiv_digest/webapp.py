@@ -212,6 +212,7 @@ class ClaudeAccount:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                env=cli.env,  # no API keys: this is a Claude account sign-in
             )
             process = self.process
         threading.Thread(target=self._follow, args=(process,), daemon=True).start()

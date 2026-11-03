@@ -1,7 +1,18 @@
 """Asking Claude questions through the Claude Code CLI (`claude -p`).
 
-This uses the person's own Claude Code sign-in (e.g. a Claude subscription), so
-no API key is needed. Each call is isolated from their usual Claude Code setup:
+arxiv-digest only works with a Claude account (a Claude subscription signed in
+to Claude Code), never with API keys or pay-as-you-go API credits:
+
+  - API-key and third-party-provider variables (ANTHROPIC_API_KEY,
+    ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY) are removed
+    from the environment Claude Code runs in. Claude Code would otherwise
+    prefer an API key in the environment over the account sign-in, and bill
+    its credits (the cause of "Credit balance is too low" errors);
+  - Claude Code counts as ready only when `claude auth status` reports a
+    Claude account sign-in (authMethod "claude.ai"), not an Anthropic Console
+    (API billing) sign-in.
+
+Each call is also isolated from the person's usual Claude Code setup:
 
   --tools ""                 no tools: Claude only reads the prompt and answers
   --system-prompt            our instructions replace Claude Code's coding prompt
@@ -17,6 +28,7 @@ subscription sign-in.)
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -34,16 +46,35 @@ class ClaudeError(Exception):
 
 
 class ClaudeNotSignedIn(ClaudeError):
-    """Claude Code is installed but not signed in to an account."""
+    """Claude Code isn't signed in to a Claude account."""
 
 
 SIGN_IN_HINT = (
-    "Sign in with `claude auth login` in a terminal, or with the Sign in button"
-    " in `arxiv-digest app`."
+    "Sign in with your Claude account: `claude auth login` in a terminal, or the"
+    " Log in button in `arxiv-digest app`."
+)
+CLAUDE_ACCOUNT = "claude.ai"  # authMethod of a Claude account (subscription) sign-in
+# Variables that make Claude Code use an API key or another provider's billing.
+API_BILLING_VARS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
 )
 _NOT_SIGNED_IN = re.compile(
-    r"not logged in|run /login|invalid api key|oauth token has expired|authentication_error", re.I
+    r"not logged in|run /login|invalid api key|oauth token has expired|authentication_error"
+    r"|credit balance",
+    re.I,
 )
+
+
+def account_env(environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment for Claude Code, without anything that selects API billing."""
+    env = dict(os.environ if environ is None else environ)
+    for name in API_BILLING_VARS:
+        env.pop(name, None)
+    return env
 
 
 @dataclass(frozen=True)
@@ -54,7 +85,14 @@ class ClaudeStatus:
     logged_in: bool | None = None  # None: couldn't tell, e.g. an older Claude Code
     email: str | None = None
     plan: str | None = None  # e.g. "pro", "max"
-    method: str | None = None  # e.g. "claude.ai", "console"
+    method: str | None = None  # e.g. "claude.ai"; "console" means API billing
+
+    @property
+    def ready(self) -> bool | None:
+        """Signed in with a Claude account (None: couldn't tell)."""
+        if self.logged_in is None:
+            return None
+        return bool(self.logged_in and self.method == CLAUDE_ACCOUNT)
 
     def describe(self) -> str:
         if not self.installed:
@@ -62,7 +100,12 @@ class ClaudeStatus:
         if self.logged_in is None:
             return "Claude Code is installed (sign-in status unknown)"
         if not self.logged_in:
-            return "Claude Code is installed but not signed in"
+            return "Claude Code is installed but not signed in to a Claude account"
+        if self.method != CLAUDE_ACCOUNT:
+            return (
+                "Claude Code is signed in with an Anthropic Console (API billing) account,"
+                " which arxiv-digest doesn't use; log in with your Claude account"
+            )
         who = f" as {self.email}" if self.email else ""
         plan = f" ({self.plan.capitalize()} plan)" if self.plan else ""
         return f"Signed in to Claude{who}{plan}"
@@ -74,6 +117,7 @@ class ClaudeStatus:
             "email": self.email,
             "plan": self.plan,
             "method": self.method,
+            "ready": self.ready,
             "description": self.describe(),
         }
 
@@ -97,11 +141,13 @@ class ClaudeCLI:
         *,
         timeout: float = DEFAULT_TIMEOUT,
         runner: Runner = subprocess.run,
+        environ: dict[str, str] | None = None,
     ) -> None:
         self.argv = shlex.split(command) or ["claude"]
         self.model = model
         self.timeout = timeout
         self._run = runner
+        self.env = account_env(environ)  # never API keys: Claude account only
 
     def available(self) -> bool:
         return shutil.which(self.argv[0]) is not None
@@ -117,6 +163,7 @@ class ClaudeCLI:
                 text=True,
                 timeout=timeout,
                 stdin=subprocess.DEVNULL,
+                env=self.env,
             )
         except (subprocess.TimeoutExpired, OSError):
             return ClaudeStatus(installed=True)
@@ -135,8 +182,8 @@ class ClaudeCLI:
         )
 
     def login_command(self) -> list[str]:
-        """Opens Claude's sign-in page in the browser (Claude subscription by default)."""
-        return [*self.argv, "auth", "login"]
+        """Opens the Claude account sign-in page in the browser."""
+        return [*self.argv, "auth", "login", "--claudeai"]
 
     def command(self, system: str, schema: dict[str, Any]) -> list[str]:
         return [
@@ -172,6 +219,7 @@ class ClaudeCLI:
                     text=True,
                     timeout=self.timeout,
                     cwd=empty,
+                    env=self.env,
                 )
             except subprocess.TimeoutExpired as exc:
                 raise ClaudeError(f"Claude did not answer within {self.timeout:g} s") from exc
@@ -189,7 +237,9 @@ class ClaudeCLI:
         if envelope.get("is_error") or envelope.get("subtype") != "success":
             reason = str(envelope.get("result") or envelope.get("subtype") or "unknown error")
             if _NOT_SIGNED_IN.search(reason):
-                raise ClaudeNotSignedIn(f"Claude Code isn't signed in ({reason[:120]})")
+                raise ClaudeNotSignedIn(
+                    f"Claude Code isn't signed in to a Claude account ({reason[:120]})"
+                )
             raise ClaudeError(f"Claude Code reported an error: {reason[:300]}")
 
         data = envelope.get("structured_output")

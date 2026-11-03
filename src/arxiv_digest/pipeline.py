@@ -197,7 +197,8 @@ def run_digest(
     )
     if ranker is not None and options.use_claude and result.shortlisted:
         not_signed_in = (
-            "Claude Code isn't signed in, so papers were chosen on this computer only."
+            "Claude Code isn't signed in to a Claude account (API keys aren't used), so"
+            " papers were chosen on this computer only."
             f" {SIGN_IN_HINT}"
         )
         if not ranker.available():

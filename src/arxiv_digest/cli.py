@@ -432,13 +432,16 @@ def status(config: ConfigOption = None) -> None:
             )
             if conf.use_claude:
                 claude = ClaudeCLI(conf.claude_command, conf.claude_model).status()
-                colour = "green" if claude.logged_in else "yellow"
+                colour = "green" if claude.ready else "yellow"
                 out.print(
                     f"[bold]Claude[/bold]     [{colour}]{escape(claude.describe())}[/{colour}]"
                     f" · model {escape(conf.claude_model)}"
                 )
-                if claude.installed and claude.logged_in is False:
-                    out.print("           Sign in with [bold]claude auth login[/bold]")
+                if claude.installed and not claude.ready:
+                    out.print(
+                        "           Log in with your Claude account:"
+                        " [bold]claude auth login --claudeai[/bold]"
+                    )
                 elif not claude.installed:
                     out.print("           Install it from https://claude.com/claude-code")
             else:

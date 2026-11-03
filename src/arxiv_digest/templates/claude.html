@@ -1,44 +1,49 @@
 {% extends "base.html" %}
-{% block title %}Claude sign-in · arxiv-digest{% endblock %}
+{% block title %}Claude account · arxiv-digest{% endblock %}
 {% block main %}
 <main class="page">
-  <h1>Claude sign-in</h1>
-  <div id="signed-in" class="card"{% if not state.logged_in %} hidden{% endif %}>
-    <p class="claude-status ok" id="who">✓ {{ state.description }}</p>
-    <p>Digests will now be chosen and explained by Claude.</p>
-    <p><a class="button primary" href="/">Back to arxiv-digest</a></p>
-  </div>
-
-  <div id="waiting" class="card"{% if state.logged_in or not state.login_running %} hidden{% endif %}>
-    <p><strong>Finish signing in in the browser tab that just opened.</strong> This page updates when you're done.</p>
+  <h1>Claude account</h1>
+  {% if state.login_running %}
+  <section class="card" id="waiting">
+    <p><strong>Finish logging in in the browser tab that just opened.</strong> This page updates when you're done.</p>
     <p id="links" class="muted"{% if not state.links %} hidden{% endif %}>If no tab opened, use this sign-in page:
       {% for url in state.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a> {% endfor %}
     </p>
-    <p class="muted small">Your sign-in is handled and stored by Claude Code itself; arxiv-digest never sees it.</p>
-  </div>
-
-  <div id="not-signed-in" class="card"{% if state.logged_in or state.login_running %} hidden{% endif %}>
+    <p class="muted small">The login is handled and stored by Claude Code itself; arxiv-digest never sees it.</p>
+  </section>
+  {% elif state.ready %}
+  <section class="card">
+    <p class="claude-status ok">✓ {{ state.description }}</p>
+    <p>Digests are chosen, explained and deep-read by Claude with this account.</p>
+    <form method="post" action="/claude/login" class="inline-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <a class="button primary" href="/">Back to arxiv-digest</a>
+      <button type="submit">Log in to a different Claude account</button>
+    </form>
+  </section>
+  {% else %}
+  <section class="card">
     {% if not state.installed %}
     <p>Claude Code isn't installed. <a href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>, then come back to this page.</p>
     {% else %}
       {% if state.output %}
-      <p><strong>The sign-in didn't finish.</strong> Claude Code said:</p>
+      <p><strong>The login didn't finish.</strong> Claude Code said:</p>
       <pre class="log">{{ state.output | join("\n") }}</pre>
       {% else %}
       <p>{{ state.description }}.</p>
       {% endif %}
       <form method="post" action="/claude/login">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button type="submit" class="primary">Sign in to Claude</button>
+        <button type="submit" class="primary">Log in to your Claude account</button>
       </form>
     {% endif %}
-  </div>
-
-  <p class="muted small">You can also sign in from a terminal with <code>claude auth login</code>.</p>
+  </section>
+  {% endif %}
+  <p class="muted small">arxiv-digest uses your Claude account (subscription) only, never API keys or API credits. You can also log in from a terminal with <code>claude auth login --claudeai</code>.</p>
 </main>
 {% endblock %}
 {% block scripts %}
-{% if state.login_running and not state.logged_in %}
+{% if state.login_running %}
 <script>
 (function () {
   async function poll() {
@@ -49,14 +54,8 @@
       setTimeout(poll, 3000);
       return;
     }
-    if (state.logged_in) {
-      document.getElementById("waiting").hidden = true;
-      document.getElementById("who").textContent = "✓ " + state.description;
-      document.getElementById("signed-in").hidden = false;
-      return;
-    }
     if (!state.login_running) {
-      window.location.reload();  // show why it stopped
+      window.location.reload();  // show the result: logged in, or why not
       return;
     }
     const links = document.getElementById("links");
