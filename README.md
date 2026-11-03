@@ -6,7 +6,7 @@
 
 <p align="center">
   A daily digest of the new arXiv papers that match <b>your</b> research interests,<br>
-  shortlisted on your own computer, then chosen and explained by Claude.
+  shortlisted by a small local model, then further ranked and explained by Claude.
 </p>
 
 **Install (recommended).** On macOS or Linux, open a terminal and run:
