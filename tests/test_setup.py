@@ -60,7 +60,6 @@ def test_setup_adds_the_app_and_opens_it(calls, tmp_path):
     assert "Added arxiv-digest to your app launcher" in output
     assert "choose your arXiv categories and interests" in output  # no config yet
     assert "Signed in to Claude as a@b.c" in output
-    assert "To update later" in output and "git pull" in output  # running from the clone
     assert calls["opened"]
     assert calls["shortcut"] == (tmp_path / "config.toml").resolve()
 

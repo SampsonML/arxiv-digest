@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import webbrowser
 from pathlib import Path
 from typing import Annotated
@@ -498,21 +497,6 @@ def setup(
             "[yellow]arxiv-digest is already running[/yellow] with the code it started with."
             " To use this version, press Quit in the app and open it again."
         )
-    project = paths.source_checkout()
-    if project is not None:
-        installer = (
-            "powershell -ExecutionPolicy Bypass -File install.ps1"
-            if sys.platform == "win32"
-            else "./install.sh"
-        )
-        folder = paths.display(project)
-        if " " in folder:
-            folder = f'"{folder}"'
-        out.print(
-            f"To update later: [bold]cd {escape(folder)}[/bold],"
-            f" then [bold]git pull[/bold] and [bold]{installer}[/bold]"
-        )
-
     if not no_open:
         try:
             url, _ = launcher.open_app(port, explicit)

@@ -9,42 +9,42 @@
   shortlisted on your own computer, then chosen and explained by Claude.
 </p>
 
-## Install
-
-Open a terminal and run the three lines for your system.
-
-**macOS and Linux**
+**Install (recommended).** On macOS or Linux, open a terminal and run:
 
 ```bash
-git clone https://github.com/SampsonML/arxiv-digest.git
-cd arxiv-digest
-./install.sh
+curl -LsSf https://raw.githubusercontent.com/SampsonML/arxiv-digest/main/install.sh | sh
 ```
 
-**Windows** (PowerShell)
+## Install
+
+The command above is the recommended way to install, on macOS and Linux. **On Windows**, open PowerShell and run
 
 ```powershell
-git clone https://github.com/SampsonML/arxiv-digest.git
-cd arxiv-digest
-powershell -ExecutionPolicy Bypass -File install.ps1
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/SampsonML/arxiv-digest/main/install.ps1 | iex"
 ```
 
 **arxiv-digest** is now in your applications, with a test-tube icon: Launchpad and Spotlight on macOS, the Start menu on Windows, and your app launcher on Linux. The installer also opens it in your browser. The first time, choose your arXiv categories and describe your interests, then press **Run today's digest**.
 
-What the installer does:
+What the installer does ([read it first](install.sh) if you like):
 1. If you don't have [uv](https://docs.astral.sh/uv/), it asks to install it. uv sets up a supported Python (3.11–3.14) for arxiv-digest without changing your system's Python.
-2. It installs arxiv-digest and its packages into a `.venv` folder inside `arxiv-digest`, at the exact versions in `uv.lock`.
+2. It downloads arxiv-digest from this repository and installs it in its own environment, with the exact package versions in `uv.lock`. The `arxiv-digest` command goes in `~/.local/bin`.
 3. It adds the app to your applications, checks whether Claude Code is signed in, and opens the app.
 
 Good to know:
-- **Keep the folder.** The app runs from it. If you move the folder, run the installer again.
 - **Claude.** For Claude's picks, reasons and deep reads, you need [Claude Code](https://claude.com/claude-code) signed in with your Claude account; API keys are never used. The app shows whether you're signed in and has a **Log in** button. Without Claude Code, arxiv-digest still works, choosing papers on your computer only.
 - **Runs on** macOS 14 or later on Apple silicon, Linux (x86-64 or ARM) and Windows 10/11. Intel Macs aren't supported, because the local model's runtime (onnxruntime) is no longer built for them.
-- **No git?** On GitHub, use **Code → Download ZIP**, unzip it, and run the installer inside the folder. On macOS, typing `git` in a terminal offers to install it.
 
-**Update:** press **Quit** in the app. Then, in the `arxiv-digest` folder, run `git pull` followed by the installer again (`./install.sh`, or the PowerShell line on Windows).
+**Update:** press **Quit** in the app, then run the install command again.
 
-**Uninstall:** in the folder, run `uv run arxiv-digest shortcut remove` (and `uv run arxiv-digest mcp uninstall` if you added the MCP server), then delete the folder. Your settings and history are in `~/.config/arxiv-digest` and `~/.local/share/arxiv-digest`; delete those too to remove everything.
+**Uninstall:**
+
+```bash
+arxiv-digest shortcut remove     # the app entry
+arxiv-digest mcp uninstall       # only if you added the MCP server
+uv tool uninstall arxiv-digest
+```
+
+Your settings and history are in `~/.config/arxiv-digest` and `~/.local/share/arxiv-digest`; delete those too to remove everything.
 
 ## What it does
 
@@ -59,20 +59,14 @@ Digests stay in the app, where you can browse every one you've made. Nothing is 
 
 ## From the terminal
 
-Everything the app does also works from the command line. The installer doesn't put `arxiv-digest` on your PATH, so in the `arxiv-digest` folder, run commands with `uv run`:
+Everything the app does also works from the command line:
 
 ```bash
-uv run arxiv-digest run       # fetch, rank, and open today's digest in the app
-uv run arxiv-digest status    # file locations, Claude's sign-in and the last run
+arxiv-digest run       # fetch, rank, and open today's digest in the app
+arxiv-digest status    # file locations, Claude's sign-in and the last run
 ```
 
-To type just `arxiv-digest` from anywhere on macOS or Linux, link it into `~/.local/bin` (uv's installer puts that folder on your PATH):
-
-```bash
-ln -s "$PWD/.venv/bin/arxiv-digest" ~/.local/bin/arxiv-digest
-```
-
-The rest of this README uses the short form.
+If your terminal says `arxiv-digest` isn't found, run `uv tool update-shell` and open a new terminal; that adds `~/.local/bin` to your PATH.
 
 The first run downloads a small language model once (~90 MB) and covers arXiv's latest announcement. After that, each run picks up everything announced since the previous run (up to 7 days back), and a paper never appears in two digests.
 
@@ -140,7 +134,7 @@ Less common settings, with their defaults:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `output_dir` | the project's `digests/` folder, or `~/arxiv-digest` | Where `arxiv-digest run --save` writes Markdown and HTML files (e.g. a folder in your Obsidian vault) |
+| `output_dir` | `~/arxiv-digest` | Where `arxiv-digest run --save` writes Markdown and HTML files (e.g. a folder in your Obsidian vault) |
 | `shortlist_size` | `40` | How many papers the local model keeps for final ranking |
 | `max_catchup_days` | `7` | The furthest back a run looks after a long break |
 | `min_zscore` | `2.5` | Without Claude, how far above the day's average similarity a paper must be to be picked on meaning alone (2.5 ≈ the closest 1%) |
@@ -191,7 +185,7 @@ With `--no-claude`, ranking stays entirely on your computer.
 | Config | `~/.config/arxiv-digest/config.toml` | `ARXIV_DIGEST_CONFIG`, `--config` |
 | Database: papers seen, cached vectors, run history | `~/.local/share/arxiv-digest/` | `ARXIV_DIGEST_HOME` |
 | Model cache | `~/.cache/arxiv-digest/models/` | `ARXIV_DIGEST_HOME` |
-| Digests | In the database. Files only when you save one: **Save digest** downloads it with your browser, and `run --save` writes to `output_dir` (default: the `digests/` folder of this project when run from a clone, which git ignores, otherwise `~/arxiv-digest`) | |
+| Digests | In the database. Files only when you save one: **Save digest** downloads it with your browser, and `run --save` writes to `output_dir` (default `~/arxiv-digest`; when you work on the code with `uv run`, the project's git-ignored `digests/` folder) | |
 
 These follow the XDG conventions (`XDG_CONFIG_HOME` etc. are respected) on every platform, macOS included. `ARXIV_DIGEST_HOME` puts the database and model cache under one folder, which is handy for testing.
 
@@ -237,7 +231,7 @@ Clicking it starts the app in the background, with no terminal window, and opens
 
 A background app stops by itself 10 minutes after you close its last tab, never during a run. You can also stop it any time with **Quit** in the top bar.
 
-The entry runs the Python environment it was added from: the `.venv` in the `arxiv-digest` folder, when you used the installer. If you move or reinstall arxiv-digest, run the installer (or `arxiv-digest setup`) again. Remove the entry with `arxiv-digest shortcut remove`.
+The entry runs the Python environment it was added from (the installer's is `~/.local/share/uv/tools/arxiv-digest`). If you install arxiv-digest another way, run `arxiv-digest setup` again. Remove the entry with `arxiv-digest shortcut remove`.
 
 ### What's in it
 
@@ -254,15 +248,18 @@ The server only listens on `127.0.0.1`. It rejects requests addressed to any oth
 
 ## Other ways to install
 
-The installer is the simplest route, but arxiv-digest is an ordinary Python package that needs Python 3.11–3.14. From a clone of this repository, any one of these also works:
+The install command is the simplest route, but arxiv-digest is an ordinary Python package that needs Python 3.11–3.14.
+
+**From a clone.** `./install.sh` (or `install.ps1` on Windows) in a clone of this repository does the same as the install command, using the clone's code. Run it again after `git pull` to update.
+
+**With pipx or pip.** From a clone, either of these works:
 
 ```bash
-uv tool install .            # with uv (puts `arxiv-digest` on your PATH)
 pipx install .               # with pipx
 python3 -m pip install .     # with plain pip, ideally in a virtual environment
 ```
 
-Then run `arxiv-digest setup` to add the app to your applications and open it.
+Then run `arxiv-digest setup` to add the app to your applications and open it. These don't use the exact versions in `uv.lock`.
 
 If your `python3` is 3.15 (or older than 3.11), pip and pipx refuse to install, because onnxruntime has no 3.15 build yet. In that case either:
 - use uv, which fetches a supported Python automatically, or
