@@ -152,7 +152,7 @@ Less common settings, with their defaults:
 | `claude_timeout` | `600` | Seconds to wait for Claude before falling back to the local ranking |
 | `deep_reads` | `3` | How many top picks Claude reads in full (0 turns deep reads off; never more than `top_picks`) |
 | `deep_read_model` | `"sonnet"` | The model for deep reads. It doesn't follow `claude_model`; set it to e.g. `"opus"` for the most thorough reading |
-| `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | The local model. `BAAI/bge-small-en-v1.5` ranks slightly better but uses about 4× the CPU. |
+| `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | The local model (~90 MB, runs on the CPU). Other [fastembed](https://github.com/qdrant/fastembed) models work too, but in a test on real arXiv papers none of the small ones ranked clearly better, and most took 2–7× the CPU time. |
 | `app_background` | `"default"` | The web app's background: `"default"`, `"none"`, or a path to your own image |
 | `allow_unknown_categories` | `false` | Allow category codes that aren't in the bundled list, e.g. one arXiv added recently |
 
