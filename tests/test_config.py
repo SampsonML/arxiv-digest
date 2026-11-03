@@ -100,3 +100,11 @@ def test_app_background_setting(tmp_path):
     assert cfg.parse(text, tmp_path / "c.toml").app_background == str(tmp_path / "pics/night.webp")
     with pytest.raises(cfg.ConfigError, match="jpg, .png or .webp"):
         cfg.parse('app_background = "notes.txt"\n' + base, tmp_path / "c.toml")
+
+
+def test_deep_reads_use_sonnet_unless_set(tmp_path):
+    base = 'categories = ["cs.LG"]\n[[interest]]\nname="x"\nkeywords=["y"]\n'
+    conf = cfg.parse('claude_model = "opus"\n' + base, tmp_path / "c.toml")
+    assert (conf.claude_model, conf.deep_read_model) == ("opus", "sonnet")
+    conf = cfg.parse('deep_read_model = "opus"\n' + base, tmp_path / "c.toml")
+    assert (conf.claude_model, conf.deep_read_model) == ("sonnet", "opus")

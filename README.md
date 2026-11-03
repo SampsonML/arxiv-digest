@@ -107,7 +107,7 @@ Less common settings, with their defaults:
 | `claude_command` | `"claude"` | The command that runs Claude Code. If it isn't on your PATH, arxiv-digest also checks the usual install locations (`~/.local/bin`, Homebrew, npm, nvm and others) and your login shell. Set a full path only if Claude Code still isn't found. |
 | `claude_timeout` | `600` | Seconds to wait for Claude before falling back to the local ranking |
 | `deep_reads` | `3` | How many top picks Claude reads in full (0 turns deep reads off; never more than `top_picks`) |
-| `deep_read_model` | same as `claude_model` | The model for deep reads, e.g. `"opus"` for the most thorough reading |
+| `deep_read_model` | `"sonnet"` | The model for deep reads. It doesn't follow `claude_model`; set it to e.g. `"opus"` for the most thorough reading |
 | `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | The local model. `BAAI/bge-small-en-v1.5` ranks slightly better but uses about 4× the CPU. |
 | `app_background` | `"default"` | The web app's background: `"default"`, `"none"`, or a path to your own image |
 | `allow_unknown_categories` | `false` | Allow category codes that aren't in the bundled list, e.g. one arXiv added recently |

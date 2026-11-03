@@ -15,6 +15,7 @@ from . import categories as cats
 from . import paths
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEEP_READ_MODEL = "sonnet"  # deep reads use this unless deep_read_model is set
 
 TOP_LEVEL_KEYS = {
     "categories",
@@ -85,7 +86,7 @@ class Config:
     claude_command: str = "claude"
     claude_timeout: float = 600.0
     deep_reads: int = 3  # top picks Claude reads in full (0: none)
-    deep_read_model: str = "sonnet"
+    deep_read_model: str = DEEP_READ_MODEL
     app_background: str = "default"  # "default", "none", or a path to an image
 
 
@@ -221,7 +222,9 @@ def parse(text: str, path: Path) -> Config:
         claude_command=claude_command.strip(),
         claude_timeout=float(_number(data, "claude_timeout", 600, 30, 3600)),
         deep_reads=int(_number(data, "deep_reads", 3, 0, 10)),
-        deep_read_model=_model_name(data.get("deep_read_model", claude_model), "deep_read_model"),
+        deep_read_model=_model_name(
+            data.get("deep_read_model", DEEP_READ_MODEL), "deep_read_model"
+        ),
         app_background=_background(data.get("app_background", "default"), path),
     )
 
@@ -316,7 +319,8 @@ def render_template(
         'claude_model = "sonnet"',
         "",
         "# Claude reads the full text of this many top picks and summarises their",
-        "# method and results (0 turns it off). Uses claude_model unless set here.",
+        "# method and results (0 turns it off). Deep reads use Sonnet whatever",
+        "# claude_model is; set deep_read_model to change that.",
         "deep_reads = 3",
         '# deep_read_model = "sonnet"',
         "",

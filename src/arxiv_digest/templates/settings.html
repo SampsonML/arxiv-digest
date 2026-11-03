@@ -51,7 +51,7 @@
     <label>Deep-read the top picks <span class="hint">Claude reads this many top papers in full and summarises their method and results (0 = off)</span>
       <input type="number" name="deep_reads" min="0" max="10" value="{{ form.values.deep_reads }}">
     </label>
-    <label>Model
+    <label>Model <span class="hint">Chooses and explains the papers. Deep reads use {{ deep_read_model }}; change that with <code>deep_read_model</code> in the config file.</span>
       <select name="claude_model">
         {% for m in models %}<option value="{{ m }}"{% if form.values.claude_model == m %} selected{% endif %}>{{ m }}{% if m == "sonnet" %} (recommended){% elif m == "haiku" %} (lighter){% elif m == "opus" %} (most thorough){% endif %}</option>{% endfor %}
         {% if form.values.claude_model not in models %}<option value="{{ form.values.claude_model }}" selected>{{ form.values.claude_model }}</option>{% endif %}

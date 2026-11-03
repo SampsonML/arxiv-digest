@@ -141,6 +141,7 @@ def test_settings_page_shows_current_settings(config_path):
     assert 'value="Fast sims"' in page
     assert 'value="astro-ph.CO" checked' in page
     assert 'name="interest-1-name"' in page  # the empty "add an interest" block
+    assert "Deep reads use sonnet" in page
 
 
 def _form(**overrides):

@@ -800,6 +800,10 @@ def create_app(
         account.start_login()
         return RedirectResponse("/claude", status_code=303)
 
+    def current_deep_read_model() -> str:
+        conf, _ = load_config()
+        return conf.deep_read_model if conf else cfg.DEEP_READ_MODEL
+
     async def settings_page(request: Request) -> Response:
         conf, problem = load_config()
         form = SettingsForm.from_config(conf)
@@ -810,6 +814,7 @@ def create_app(
             form=form,
             groups=_category_groups(set(form.categories)),
             models=MODEL_CHOICES,
+            deep_read_model=conf.deep_read_model if conf else cfg.DEEP_READ_MODEL,
             problem=problem,
             saved=request.query_params.get("saved") == "1",
             exists=config_path.exists(),
@@ -836,6 +841,7 @@ def create_app(
                 form=form,
                 groups=_category_groups(set(form.categories)),
                 models=MODEL_CHOICES,
+                deep_read_model=current_deep_read_model(),
                 problem=str(exc),
                 saved=False,
                 exists=config_path.exists(),
