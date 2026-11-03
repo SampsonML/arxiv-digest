@@ -137,4 +137,4 @@ uv run ruff check . && uv run ruff format --check .
 
 ## License
 
-MIT (a LICENSE file will be added before the first release).
+[MIT](LICENSE) © 2026 Matt Wiemann
