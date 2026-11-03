@@ -607,3 +607,32 @@ def test_deep_read_option_step_and_setting(config_path):
     assert 'name="deep_reads"' in page and 'value="3"' in page
     client.post("/settings", data=_form(deep_reads="1"))
     assert cfg.load(config_path).deep_reads == 1
+
+
+def test_offer_to_add_the_launcher_entry(config_path, monkeypatch):
+    from arxiv_digest import launcher
+
+    installed = []
+    monkeypatch.setattr(launcher, "shortcut_installed", lambda: bool(installed))
+    monkeypatch.setattr(launcher, "shortcut_place", lambda: "Applications")
+    monkeypatch.setattr(launcher, "install_shortcut", lambda config=None: installed.append(config))
+    client, _ = _client(config_path)
+    page = client.get("/").text
+    assert ">Add to Applications</button>" in page and "No thanks" in page
+    assert client.post("/shortcut", data={"action": "install"}).status_code == 403
+    response = client.post(
+        "/shortcut", data={"csrf": TOKEN, "action": "install"}, follow_redirects=False
+    )
+    assert response.headers["location"] == "/?shortcut=added" and len(installed) == 1
+    assert "Open arxiv-digest from Applications" in client.get("/?shortcut=added").text
+    assert "Add to Applications" not in client.get("/").text  # installed: no more offer
+
+
+def test_no_thanks_is_remembered(config_path, monkeypatch):
+    from arxiv_digest import launcher
+
+    monkeypatch.setattr(launcher, "shortcut_installed", lambda: False)
+    client, _ = _client(config_path)
+    assert 'class="card shortcut-offer"' in client.get("/").text
+    client.post("/shortcut", data={"csrf": TOKEN, "action": "dismiss"})
+    assert 'class="card shortcut-offer"' not in client.get("/").text

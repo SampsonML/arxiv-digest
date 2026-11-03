@@ -12,7 +12,7 @@
     {% endif %}
   </div>
   {% elif not claude.installed %}
-  <p class="claude-status warn">Claude Code isn't installed, so digests are ranked on this computer only, without Claude's picks, explanations and deep reads. <a href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>, then reload this page.</p>
+  <p class="claude-status warn">Claude Code isn't installed, so digests are ranked on this computer only, without Claude's picks, explanations and deep reads. <a href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>, then reload this page. Already installed? Set <code>claude_command</code> in your config to its full path (run <code>which claude</code> in a terminal).</p>
   {% else %}
   <div class="claude-status warn">
     <p>{{ claude.describe() }}. Until then, digests are ranked on this computer only, without Claude's picks, explanations and deep reads. arxiv-digest only uses a Claude account, never API keys.</p>

@@ -34,7 +34,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from . import __version__, paths
+from . import __version__, launcher, paths
 from . import categories as cats
 from . import config as cfg
 from .claude_cli import SIGN_IN_HINT, ClaudeCLI, ClaudeStatus
@@ -599,10 +599,39 @@ def create_app(
             summary=interest_summary,
             empty_interest=EMPTY_INTEREST,
             claude=account.status() if conf and conf.use_claude else None,
+            shortcut=shortcut_offer(request),
         )
+
+    def shortcut_offer(request: Request) -> dict[str, Any] | None:
+        added = request.query_params.get("shortcut") == "added"
+        if added:
+            return {"added": True, "place": launcher.shortcut_place()}
+        if launcher.shortcut_installed() or launcher.offer_dismissed():
+            return None
+        return {"added": False, "place": launcher.shortcut_place(), "error": None}
 
     async def index(request: Request) -> Response:
         return render_index(request)
+
+    async def shortcut(request: Request) -> Response:
+        if not await check_csrf(request):
+            return Response("Invalid or missing form token; reload the page.", status_code=403)
+        form = await request.form()
+        if form.get("action") == "dismiss":
+            launcher.dismiss_offer()
+            return RedirectResponse("/", status_code=303)
+        explicit = None if config_path == paths.config_path() else config_path.resolve()
+        try:
+            launcher.install_shortcut(explicit)
+        except (launcher.LauncherError, OSError) as exc:
+            return page(
+                "message.html",
+                request,
+                500,
+                title="Couldn't add arxiv-digest",
+                message=f"{exc}. You can also run `arxiv-digest shortcut install` in a terminal.",
+            )
+        return RedirectResponse("/?shortcut=added", status_code=303)
 
     async def save_interests(request: Request) -> Response:
         if not await check_csrf(request):
@@ -818,6 +847,7 @@ def create_app(
         routes=[
             Route("/", index),
             Route("/interests", save_interests, methods=["POST"]),
+            Route("/shortcut", shortcut, methods=["POST"]),
             Route("/digest/{digest_id:int}", show_digest),
             Route("/run", start_run, methods=["POST"]),
             Route("/run", run_page, methods=["GET"]),

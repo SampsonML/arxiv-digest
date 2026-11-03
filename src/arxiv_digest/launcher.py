@@ -239,7 +239,10 @@ def _install_macos(command: list[str]) -> list[Path]:
     }
     (contents / "Info.plist").write_bytes(plistlib.dumps(info))
     script = contents / "MacOS" / APP_ID
-    script.write_text(macos_script(command, _extra_env()), encoding="utf-8")
+    # Apps opened from Finder/Spotlight get a minimal PATH; keep the terminal's, so
+    # Claude Code (often in ~/.local/bin or Homebrew) is found.
+    env = {**_extra_env(), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    script.write_text(macos_script(command, env), encoding="utf-8")
     script.chmod(0o755)
     (contents / "Resources" / f"{APP_ID}.icns").write_bytes(_icon("arxiv-digest.icns"))
     return [app]
@@ -309,3 +312,34 @@ def remove_shortcut() -> list[Path]:
     if sys.platform not in ("darwin", "win32"):
         _refresh_linux_caches()
     return removed
+
+
+def shortcut_installed() -> bool:
+    if sys.platform == "darwin":
+        return _macos_app().exists()
+    if sys.platform == "win32":
+        return _windows_shortcut().exists()
+    return _linux_files()["entry"].exists()
+
+
+def shortcut_place() -> str:
+    """Where the launcher entry goes, in words for the web app's offer."""
+    if sys.platform == "darwin":
+        return "Applications"
+    if sys.platform == "win32":
+        return "the Start menu"
+    return "your app launcher"
+
+
+def _offer_flag() -> Path:
+    return paths.data_dir() / "shortcut-offer-dismissed"
+
+
+def offer_dismissed() -> bool:
+    return _offer_flag().exists()
+
+
+def dismiss_offer() -> None:
+    flag = _offer_flag()
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text("The web app no longer offers to add a launcher entry.\n", encoding="utf-8")

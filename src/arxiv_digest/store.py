@@ -136,6 +136,10 @@ class Store:
         )
         return [Paper.from_dict(json.loads(row[0])) for row in rows]
 
+    def get_paper(self, paper_id: str) -> Paper | None:
+        row = self.db.execute("SELECT data FROM papers WHERE id = ?", (paper_id,)).fetchone()
+        return Paper.from_dict(json.loads(row[0])) if row else None
+
     # -- embeddings ---------------------------------------------------------
 
     def get_embeddings(self, ids: Iterable[str], model: str) -> dict[str, np.ndarray]:

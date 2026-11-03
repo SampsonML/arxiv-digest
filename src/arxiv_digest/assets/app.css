@@ -283,3 +283,8 @@ body:not(.has-bg) .page > h1, body:not(.has-bg) .digest header { text-shadow: no
 .claude-status.ok { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .9rem; }
 .inline-form { display: inline-flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: 0; }
 a.button.small, button.small { padding: .28rem .7rem; font-size: .82rem; font-weight: 500; border-radius: 8px; }
+
+/* Offer to add a launcher entry */
+.shortcut-offer .offer-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.shortcut-offer .offer-row p { flex: 1; min-width: 16rem; margin: 0; }
+.offer-icon { width: 44px; height: 44px; border-radius: 11px; box-shadow: 0 0 18px rgba(79, 193, 201, .25); }

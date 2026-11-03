@@ -33,9 +33,12 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 DEFAULT_TIMEOUT = 600  # seconds
@@ -67,6 +70,81 @@ _NOT_SIGNED_IN = re.compile(
     r"|credit balance",
     re.I,
 )
+
+
+def _usable(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def _known_locations() -> list[Path]:
+    """Where Claude Code's installers put `claude` (checked when it isn't on PATH)."""
+    home = Path.home()
+    places = [
+        home / ".local" / "bin" / "claude",  # native installer (macOS, Linux)
+        home / ".claude" / "local" / "claude",  # older "local" installs
+        Path("/opt/homebrew/bin/claude"),  # Homebrew on Apple silicon
+        Path("/usr/local/bin/claude"),  # Homebrew on Intel, npm global
+        home / ".npm-global" / "bin" / "claude",
+        home / ".volta" / "bin" / "claude",
+        home / ".bun" / "bin" / "claude",
+        home / ".local" / "share" / "mise" / "shims" / "claude",
+        home / ".asdf" / "shims" / "claude",
+        *sorted(home.glob(".nvm/versions/node/*/bin/claude"), reverse=True),
+    ]
+    if os.name == "nt":
+        appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        places = [home / ".local" / "bin" / "claude.exe", appdata / "npm" / "claude.cmd", *places]
+    return places
+
+
+@lru_cache(maxsize=16)
+def find_claude(command: str, path_env: str | None, shell: str | None) -> str | None:
+    """The full path of the Claude Code CLI, or None.
+
+    Apps opened from a launcher (notably on macOS) get a minimal PATH without
+    ~/.local/bin or Homebrew, so after PATH this checks the usual install
+    locations and finally asks the login shell, which loads the user's PATH.
+    """
+    found = shutil.which(command, path=path_env)
+    if found:
+        return found
+    if os.sep in command or (os.altsep and os.altsep in command):
+        candidate = Path(command).expanduser()
+        return str(candidate) if _usable(candidate) else None
+    if command != "claude":
+        return None
+    for candidate in _known_locations():
+        if _usable(candidate):
+            return str(candidate)
+    if shell and os.name != "nt":
+        try:
+            out = subprocess.run(
+                [shell, "-lic", "command -v claude"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                stdin=subprocess.DEVNULL,
+            ).stdout
+        except (subprocess.TimeoutExpired, OSError):
+            out = ""
+        for line in reversed(out.splitlines()):
+            line = line.strip()
+            if line.startswith("/") and _usable(Path(line)):
+                return line
+    return None
+
+
+def _with_path(env: dict[str, str], executable: str | None) -> dict[str, str]:
+    """Make sure Claude Code (and node, for npm installs) can be found by the child."""
+    parts = [p for p in env.get("PATH", "").split(os.pathsep) if p]
+    wanted = [str(Path(executable).parent)] if executable else []
+    wanted += [str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+    prefix: list[str] = []
+    for folder in wanted:  # Claude Code's own folder first
+        if folder not in parts and folder not in prefix and os.path.isdir(folder):
+            prefix.append(folder)
+    env["PATH"] = os.pathsep.join(prefix + parts)
+    return env
 
 
 def account_env(environ: dict[str, str] | None = None) -> dict[str, str]:
@@ -144,13 +222,22 @@ class ClaudeCLI:
         environ: dict[str, str] | None = None,
     ) -> None:
         self.argv = shlex.split(command) or ["claude"]
+        self._environ = dict(os.environ if environ is None else environ)
         self.model = model
         self.timeout = timeout
         self._run = runner
-        self.env = account_env(environ)  # never API keys: Claude account only
+        executable = self.executable()
+        if executable:
+            self.argv = [executable, *self.argv[1:]]
+        # Never API keys: Claude account only. PATH includes Claude Code's folder.
+        self.env = _with_path(account_env(self._environ), executable)
+
+    def executable(self) -> str | None:
+        shell = self._environ.get("SHELL") or ("/bin/zsh" if sys.platform == "darwin" else None)
+        return find_claude(self.argv[0], self._environ.get("PATH"), shell)
 
     def available(self) -> bool:
-        return shutil.which(self.argv[0]) is not None
+        return self.executable() is not None
 
     def status(self, timeout: float = 20) -> ClaudeStatus:
         """Sign-in status from `claude auth status --json` (fast; uses no Claude usage)."""

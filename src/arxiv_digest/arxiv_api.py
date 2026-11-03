@@ -220,6 +220,14 @@ class ArxivClient:
                 progress(min(offset, total), total)
         return sorted(papers.values(), key=lambda p: p.published, reverse=True)
 
+    def by_ids(self, ids: list[str]) -> list[Paper]:
+        """Papers by arXiv id (latest metadata)."""
+        if not ids:
+            return []
+        text = self._get({"id_list": ",".join(ids), "start": 0, "max_results": len(ids)})
+        papers, _ = parse_feed(text)
+        return papers
+
     def newest(self, categories: list[str]) -> Paper | None:
         """The most recently submitted (and announced) paper in `categories`."""
         query = "(" + " OR ".join(f"cat:{c}" for c in categories) + ")"

@@ -275,6 +275,32 @@ def run_digest(
     return result
 
 
+def latest_shortlist(
+    config: Config,
+    store: Store,
+    client: ArxivClient,
+    embedder: Embedder | None,
+    *,
+    log: Log = print,
+) -> tuple[list[Paper], list[Candidate]]:
+    """arXiv's latest announcement, shortlisted locally (no Claude, nothing marked seen).
+
+    Used by the MCP server, where the Claude you're talking to makes the picks.
+    """
+    newest = client.newest(config.categories)
+    now = datetime.now(UTC)
+    anchor = newest.published if newest else now
+    papers = client.search(config.categories, announcement_start(anchor), now)
+    vectors = queries = None
+    if embedder is not None and papers:
+        try:
+            vectors, queries = _embed(embedder, store, papers, config, log)
+        except EmbeddingUnavailable:
+            vectors = queries = None
+    candidates = score_papers(papers, config.interests, vectors, queries)
+    return papers, shortlist(candidates, config.interests, config.shortlist_size)
+
+
 def run_with_config(
     config: Config,
     options: RunOptions | None = None,

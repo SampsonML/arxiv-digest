@@ -355,6 +355,41 @@ def open_command(
     out.print(("Started" if started else "Already running") + f" at {url}")
 
 
+mcp_app = typer.Typer(help="Use arxiv-digest from Claude (Claude Code, Claude Desktop) via MCP.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve")
+def mcp_serve(config: ConfigOption = None) -> None:
+    """Run the MCP server over stdio (Claude starts this; you don't need to)."""
+    from .mcp_server import create_server
+
+    create_server(_config_path(config)).run("stdio")
+
+
+@mcp_app.command("install")
+def mcp_install(config: ConfigOption = None) -> None:
+    """Make arxiv-digest's tools available in Claude Code (all projects) and Claude Desktop."""
+    from . import mcp_setup
+
+    explicit = config.expanduser().resolve() if config else None
+    for line in mcp_setup.install(explicit):
+        out.print(escape(line))
+    out.print(
+        "Try asking Claude: [bold]What's in my latest arXiv digest?[/bold]"
+        f"\nThe server runs: [dim]{escape(' '.join(mcp_setup.serve_command(explicit)))}[/dim]"
+    )
+
+
+@mcp_app.command("uninstall")
+def mcp_uninstall() -> None:
+    """Remove arxiv-digest from Claude Code and Claude Desktop."""
+    from . import mcp_setup
+
+    for line in mcp_setup.uninstall() or ["Nothing to remove."]:
+        out.print(escape(line))
+
+
 shortcut_app = typer.Typer(help="Add or remove the arxiv-digest entry in your app launcher.")
 app.add_typer(shortcut_app, name="shortcut")
 

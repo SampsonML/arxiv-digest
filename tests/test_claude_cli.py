@@ -143,7 +143,7 @@ def test_api_keys_and_other_providers_are_never_passed_to_claude_code():
     cli.status()
     for _, kwargs in runner.calls:
         env = kwargs["env"]
-        assert env["PATH"] == "/usr/bin" and env["HOME"] == "/home/me"
+        assert "/usr/bin" in env["PATH"].split(os.pathsep) and env["HOME"] == "/home/me"
         for name in (
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
@@ -166,3 +166,50 @@ def test_credit_balance_errors_mean_no_claude_account():
     runner = FakeRunner(stdout=_envelope(is_error=True, result="Credit balance is too low"))
     with pytest.raises(ClaudeNotSignedIn, match="Claude account"):
         _cli(runner).ask("s", "p", SCHEMA)
+
+
+def _fake_claude(folder):
+    folder.mkdir(parents=True, exist_ok=True)
+    exe = folder / "claude"
+    exe.write_text("#!/bin/sh\necho claude\n")
+    exe.chmod(0o755)
+    return exe
+
+
+def test_finds_claude_outside_path_like_a_macos_app(tmp_path, monkeypatch):
+    from arxiv_digest.claude_cli import find_claude
+
+    find_claude.cache_clear()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    exe = _fake_claude(tmp_path / ".local" / "bin")
+    minimal = "/usr/bin:/bin:/usr/sbin:/sbin"  # what macOS gives apps started from Finder
+    assert find_claude("claude", minimal, None) == str(exe)
+    cli = ClaudeCLI("claude", environ={"PATH": minimal, "HOME": str(tmp_path)})
+    assert cli.available() and cli.argv[0] == str(exe)
+    assert cli.env["PATH"].split(os.pathsep)[0] == str(exe.parent)  # node etc. findable too
+    find_claude.cache_clear()
+
+
+def test_asks_the_login_shell_as_a_last_resort(tmp_path, monkeypatch):
+    from arxiv_digest.claude_cli import find_claude
+
+    find_claude.cache_clear()
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    exe = _fake_claude(tmp_path / "somewhere" / "odd")
+    shell = tmp_path / "fake-shell"
+    shell.write_text(f"#!/bin/sh\necho 'welcome banner'\necho {exe}\n")
+    shell.chmod(0o755)
+    assert find_claude("claude", "/usr/bin:/bin", str(shell)) == str(exe)
+    find_claude.cache_clear()
+
+
+def test_custom_path_and_not_installed(tmp_path, monkeypatch):
+    from arxiv_digest.claude_cli import find_claude
+
+    find_claude.cache_clear()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    exe = _fake_claude(tmp_path / "tools")
+    assert find_claude(str(exe), "/usr/bin", None) == str(exe)
+    assert find_claude("claude", "/nonexistent", None) is None
+    assert find_claude("not-claude-xyz", "/nonexistent", None) is None
+    find_claude.cache_clear()

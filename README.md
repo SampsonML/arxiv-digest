@@ -9,7 +9,7 @@ You describe what you care about: keywords, a sentence or two about a research i
 
 Or run `arxiv-digest app` for the same thing in a browser window: browse past digests, run a new one, and edit your interests in forms.
 
-> **Status: v0.4.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Every digest is written as Markdown and as HTML, and there's a local web app. Coming next: an MCP server so Claude Desktop and Claude Code can use the digest directly.
+> **Status: v0.4.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Every digest is written as Markdown and as HTML. There's a local web app, and an MCP server so Claude Code and Claude Desktop can use your digests directly.
 
 ## Install
 
@@ -51,6 +51,7 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest categories remove hep-th` | Stop watching a category |
 | `arxiv-digest interests` | Show your interests |
 | `arxiv-digest status` | File locations, papers seen, Claude's status, and the last run |
+| `arxiv-digest mcp install` / `uninstall` | Make arxiv-digest's tools available in Claude Code and Claude Desktop (see [Use it from Claude](#use-it-from-claude-mcp)) |
 | `arxiv-digest app [--port 8765]` | Run the web app in this terminal and open it in your browser |
 | `arxiv-digest open` | Open the web app, starting it in the background if needed (what the launcher entry runs) |
 | `arxiv-digest shortcut install` / `remove` | Add or remove "arxiv-digest" in your system's app launcher |
@@ -97,7 +98,7 @@ Less common settings, with their defaults:
 | `min_zscore` | `2.5` | Without Claude, how far above the day's average similarity a paper must be to be picked on meaning alone (2.5 ≈ the closest 1%) |
 | `use_claude` | `true` | Let Claude pick the final papers and explain each one (needs [Claude Code](https://claude.com/claude-code)) |
 | `claude_model` | `"sonnet"` | `"sonnet"`, `"haiku"` (lighter) or `"opus"` (most thorough), or a full model name |
-| `claude_command` | `"claude"` | The command that runs Claude Code, if it isn't `claude` on your PATH |
+| `claude_command` | `"claude"` | The command that runs Claude Code. If it isn't on your PATH, arxiv-digest also checks the usual install locations (`~/.local/bin`, Homebrew, npm, nvm and others) and your login shell. Set a full path only if Claude Code still isn't found. |
 | `claude_timeout` | `600` | Seconds to wait for Claude before falling back to the local ranking |
 | `deep_reads` | `3` | How many top picks Claude reads in full (0 turns deep reads off; never more than `top_picks`) |
 | `deep_read_model` | same as `claude_model` | The model for deep reads, e.g. `"opus"` for the most thorough reading |
@@ -154,9 +155,37 @@ uv run pytest           # fast and offline: fake arXiv responses and a fake mode
 uv run ruff check . && uv run ruff format --check .
 ```
 
+## Use it from Claude (MCP)
+
+```bash
+arxiv-digest mcp install
+```
+
+This adds arxiv-digest's tools to **Claude Code**, for all your projects (`claude mcp add --scope user`), and, if it's installed, **Claude Desktop** (macOS and Windows; restart Claude Desktop afterwards). Then you can ask Claude things like:
+
+- "What's in my latest arXiv digest? Summarise the top picks."
+- "Any new papers this week on emulators for weak lensing?"
+- "Read 2611.02627 and compare its method with my top pick."
+- "Add an interest for intrinsic alignments, with the keyword *IA*."
+
+The tools:
+
+| Tool | What it does |
+|---|---|
+| `list_digests`, `get_digest` | Your digests, with Claude's reasons and deep reads |
+| `search_papers` | Searches the last ~90 days of papers in your categories by meaning, including ones that weren't picked |
+| `get_paper` | A paper's details by arXiv id or link, and optionally its full text, in parts |
+| `todays_candidates` | The latest announcement, shortlisted on your computer, for the Claude you're talking to to judge (nothing is marked as seen) |
+| `run_digest` | Runs a digest like the Run button |
+| `list_interests`, `add_interest`, `update_interest`, `remove_interest` | Manage your interests (checked before saving; comments in the file are kept) |
+
+The server runs on your computer over stdio. Claude starts it; it opens no network port. Only `run_digest` calls Claude itself, through Claude Code with your Claude account, exactly like the Run button. The other tools leave the thinking to the Claude you're already talking to. Paper text in the results is marked as untrusted data. Claude Code asks your permission before using each tool, unless you allow it. `arxiv-digest mcp uninstall` removes it.
+
 ## Web app
 
 ### Opening it without a terminal
+
+The first time you open the web app, it offers to add itself to your Applications (macOS), Start menu (Windows) or app launcher (Linux) with one click. You can also do it from a terminal:
 
 ```bash
 arxiv-digest shortcut install
@@ -195,7 +224,7 @@ The server only listens on `127.0.0.1`. It rejects requests addressed to any oth
 2. ✅ Claude ranking through the Claude Code CLI (`claude -p`): picks only relevant papers, up to the cap, with a "why it was chosen" line for each
 3. ✅ HTML digests (same content as the Markdown; math rendered with KaTeX) and the local web app
 4. ✅ Deep read: Claude reads the full text of the top picks and summarises the method and results
-5. MCP server, so Claude can browse, search and explain your digest
+5. ✅ MCP server, so Claude can browse, search and explain your digests
 6. PyPI release and a Claude Code plugin
 
 ## License
