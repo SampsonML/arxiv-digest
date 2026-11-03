@@ -1,0 +1,364 @@
+"""The `arxiv-digest` command."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.console import Console
+from rich.markup import escape
+from rich.table import Table
+
+from . import __version__, paths
+from . import categories as cats
+from . import config as cfg
+from .arxiv_api import ArxivClient, ArxivError
+from .claude_cli import ClaudeCLI
+from .embed import FastEmbedder
+from .pipeline import RunOptions, run_digest
+from .rank import ClaudeRanker
+from .store import Store
+
+app = typer.Typer(
+    help="A daily digest of the new arXiv papers that match your interests.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+categories_app = typer.Typer(help="Show or change the arXiv categories you watch.")
+app.add_typer(categories_app, name="categories")
+
+err = Console(stderr=True, soft_wrap=True)
+out = Console(soft_wrap=True)
+
+ConfigOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--config", "-c", help="Config file to use (default: ~/.config/arxiv-digest/config.toml)."
+    ),
+]
+
+
+def _config_path(option: Path | None) -> Path:
+    return option.expanduser() if option else paths.config_path()
+
+
+def _fail(message: str) -> None:
+    err.print(f"[red]Error:[/red] {escape(message)}")
+    raise typer.Exit(1)
+
+
+def _load(option: Path | None) -> cfg.Config:
+    try:
+        return cfg.load(_config_path(option))
+    except cfg.ConfigError as exc:
+        _fail(str(exc))
+        raise  # unreachable; keeps type checkers happy
+
+
+def _version(value: bool) -> None:
+    if value:
+        out.print(f"arxiv-digest {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[
+        bool, typer.Option("--version", callback=_version, is_eager=True, help="Show the version.")
+    ] = False,
+) -> None:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# init
+
+
+def _split(text: str) -> list[str]:
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def _ask_categories() -> list[str]:
+    while True:
+        answer = typer.prompt(
+            "arXiv categories to watch, comma-separated (e.g. astro-ph.CO, cs.LG)"
+        )
+        codes, problems = [], []
+        for code in _split(answer):
+            official = cats.canonical(code)
+            if official:
+                codes.append(official)
+            else:
+                hint = cats.suggestions(code)
+                problems.append(
+                    f"{code!r}" + (f" (did you mean {', '.join(hint)}?)" if hint else "")
+                )
+        if problems:
+            err.print(f"[yellow]Unknown:[/yellow] {escape(', '.join(problems))}")
+            err.print("See all codes with `arxiv-digest categories list --all`.")
+        elif codes:
+            return codes
+
+
+def _ask_interest() -> cfg.Interest:
+    name = typer.prompt("Name of an interest (e.g. Weak lensing)").strip()
+    while True:
+        description = typer.prompt(
+            "Describe it in a sentence or two (optional)", default="", show_default=False
+        )
+        keywords = _split(
+            typer.prompt(
+                "Keywords or phrases, comma-separated (optional)", default="", show_default=False
+            )
+        )
+        authors = _split(
+            typer.prompt(
+                "Authors whose papers you always want, comma-separated (optional)",
+                default="",
+                show_default=False,
+            )
+        )
+        if description.strip() or keywords or authors:
+            return cfg.Interest(
+                name=name, description=description.strip(), keywords=keywords, authors=authors
+            )
+        err.print("[yellow]Give at least a description, keywords or authors.[/yellow]")
+
+
+@app.command()
+def init(
+    config: ConfigOption = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing config.")] = False,
+) -> None:
+    """Create a config file by answering a few questions."""
+    path = _config_path(config)
+    if path.exists() and not force:
+        _fail(f"A config already exists at {path}. Edit it, or use --force to start over.")
+    out.print(
+        "Let's set up your arXiv digest. You can change everything later in the config file.\n"
+    )
+    categories = _ask_categories()
+    output_dir = typer.prompt(
+        "Folder for the daily Markdown files", default=paths.default_output_dir()
+    )
+    interests = [_ask_interest()]
+    while typer.confirm("Add another interest?", default=False):
+        interests.append(_ask_interest())
+    text = cfg.render_template(categories, output_dir, interests)
+    cfg.parse(text, path)  # sanity check before writing
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    out.print(f"\n[green]Saved[/green] {escape(str(path))}")
+    out.print("Next: [bold]arxiv-digest run[/bold] (the first run downloads a ~90 MB model once).")
+
+
+# ---------------------------------------------------------------------------
+# run
+
+
+@app.command()
+def run(
+    config: ConfigOption = None,
+    days: Annotated[
+        float | None,
+        typer.Option(help="Cover the last N days of submissions instead of 'new since last run'."),
+    ] = None,
+    include_seen: Annotated[
+        bool,
+        typer.Option(
+            "--include-seen",
+            help="Also include papers shown in earlier digests (e.g. after editing interests).",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", help="Print the digest instead of saving it, and remember nothing."
+        ),
+    ] = False,
+    no_model: Annotated[
+        bool,
+        typer.Option(
+            "--no-model", help="Rank by keywords and authors only (skip the local model)."
+        ),
+    ] = False,
+    no_claude: Annotated[
+        bool,
+        typer.Option("--no-claude", help="Choose papers on this computer only (no Claude)."),
+    ] = False,
+    show: Annotated[
+        bool, typer.Option("--print", help="Also print the digest to the terminal.")
+    ] = False,
+) -> None:
+    """Fetch new papers, rank them, and write today's digest."""
+    conf = _load(config)
+    store = Store(paths.database_path())
+    client = ArxivClient()
+    embedder = None if no_model else FastEmbedder(conf.embedding_model, paths.model_cache_dir())
+    use_claude = conf.use_claude and not no_claude
+    ranker = (
+        ClaudeRanker(ClaudeCLI(conf.claude_command, conf.claude_model, timeout=conf.claude_timeout))
+        if use_claude
+        else None
+    )
+    options = RunOptions(
+        days=days,
+        include_seen=include_seen,
+        dry_run=dry_run,
+        use_embeddings=not no_model,
+        use_claude=use_claude,
+    )
+    try:
+        result = run_digest(
+            conf,
+            store,
+            client,
+            embedder,
+            options,
+            ranker=ranker,
+            log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]"),
+        )
+    except ArxivError as exc:
+        _fail(str(exc))
+    finally:
+        client.close()
+        store.close()
+
+    for note in result.notes:
+        err.print(f"[yellow]Note:[/yellow] {escape(note)}")
+    if result.markdown is None:
+        return
+    if dry_run or show:
+        out.print(result.markdown, markup=False, highlight=False)
+    summary = (
+        f"{len(result.new_papers)} new papers · {len(result.shortlisted)} shortlisted ·"
+        f" {len(result.picks)} picked"
+    )
+    if result.path:
+        err.print(f"[green]{summary}[/green] → {escape(str(result.path))}", soft_wrap=True)
+    else:
+        err.print(f"[green]{summary}[/green] (dry run: nothing saved)")
+
+
+# ---------------------------------------------------------------------------
+# categories
+
+
+@categories_app.command("list")
+def categories_list(
+    config: ConfigOption = None,
+    all_: Annotated[bool, typer.Option("--all", help="List every arXiv category.")] = False,
+) -> None:
+    """List the categories you watch (or all of arXiv's with --all)."""
+    codes = sorted(cats.CATEGORIES) if all_ else _load(config).categories
+    table = Table(show_header=False, box=None, pad_edge=False)
+    for code in codes:
+        table.add_row(f"[bold]{code}[/bold]", cats.CATEGORIES.get(code, "(not in arXiv's list)"))
+    out.print(table)
+
+
+@categories_app.command("add")
+def categories_add(
+    codes: Annotated[list[str], typer.Argument(help="Category codes, e.g. hep-th astro-ph.HE")],
+    config: ConfigOption = None,
+) -> None:
+    """Start watching more categories."""
+    try:
+        conf, added = cfg.add_categories(_config_path(config), codes)
+    except cfg.ConfigError as exc:
+        _fail(str(exc))
+    if added:
+        out.print(f"Added {', '.join(added)}. Now watching: {', '.join(conf.categories)}")
+    else:
+        out.print(f"Nothing to add. Watching: {', '.join(conf.categories)}")
+
+
+@categories_app.command("remove")
+def categories_remove(
+    codes: Annotated[list[str], typer.Argument(help="Category codes to stop watching")],
+    config: ConfigOption = None,
+) -> None:
+    """Stop watching categories."""
+    try:
+        conf, removed = cfg.remove_categories(_config_path(config), codes)
+    except cfg.ConfigError as exc:
+        _fail(str(exc))
+    if removed:
+        out.print(f"Removed {', '.join(removed)}. Now watching: {', '.join(conf.categories)}")
+    else:
+        out.print(f"None of those were watched. Watching: {', '.join(conf.categories)}")
+
+
+# ---------------------------------------------------------------------------
+# interests, status
+
+
+@app.command()
+def interests(config: ConfigOption = None) -> None:
+    """Show the interests in your config."""
+    conf = _load(config)
+    for interest in conf.interests:
+        out.print(f"[bold]{escape(interest.name)}[/bold]")
+        if interest.description:
+            out.print(f"  {escape(interest.description)}")
+        for label, values in (
+            ("keywords", interest.keywords),
+            ("require", interest.require),
+            ("exclude", interest.exclude),
+            ("authors", interest.authors),
+        ):
+            if values:
+                out.print(f"  [dim]{label}:[/dim] {escape(', '.join(values))}")
+    out.print(f"\n[dim]Edit them in {escape(str(conf.path))}[/dim]")
+
+
+@app.command()
+def status(config: ConfigOption = None) -> None:
+    """Show where files live and what the last run did."""
+    path = _config_path(config)
+    out.print(
+        f"[bold]Config[/bold]     {escape(str(path))}" + ("" if path.exists() else "  (missing)")
+    )
+    if path.exists():
+        try:
+            conf = cfg.load(path)
+            out.print(f"[bold]Digests[/bold]    {escape(str(conf.output_dir))}")
+            out.print(f"[bold]Categories[/bold] {', '.join(conf.categories)}")
+            out.print(
+                f"[bold]Interests[/bold]  {escape(', '.join(i.name for i in conf.interests))}"
+            )
+            if conf.use_claude:
+                found = ClaudeCLI(conf.claude_command, conf.claude_model).available()
+                state = "ready" if found else "not found, so papers are ranked locally"
+                out.print(
+                    f"[bold]Claude[/bold]     {escape(conf.claude_model)} via"
+                    f" `{escape(conf.claude_command)}` ({state})"
+                )
+            else:
+                out.print("[bold]Claude[/bold]     off (use_claude = false)")
+        except cfg.ConfigError as exc:
+            out.print(f"[red]Config problem:[/red] {escape(str(exc))}")
+    db = paths.database_path()
+    out.print(f"[bold]Database[/bold]   {escape(str(db))}")
+    if db.exists():
+        store = Store(db)
+        try:
+            last = store.last_run()
+            out.print(f"[bold]Seen[/bold]       {store.count_seen()} papers")
+            if last:
+                out.print(
+                    f"[bold]Last run[/bold]   {last['finished'][:16].replace('T', ' ')} UTC ·"
+                    f" {last['new']} new · {last['picked']} picked"
+                    + (f" → {escape(last['digest_path'])}" if last["digest_path"] else "")
+                )
+        finally:
+            store.close()
+
+
+def main() -> None:
+    app()
+
+
+if __name__ == "__main__":
+    main()
