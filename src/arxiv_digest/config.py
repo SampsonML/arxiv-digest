@@ -360,3 +360,63 @@ def remove_categories(path: Path, codes: list[str]) -> tuple[Config, list[str]]:
     else:
         doc["categories"] = [c for c in current.categories if c not in removed]
     return _save(path, doc), removed
+
+
+# ---------------------------------------------------------------------------
+# Saving everything at once (the web app's settings form)
+
+
+def _interest_table(interest: Interest) -> tomlkit.items.Table:
+    table = tomlkit.table()
+    table.add("name", interest.name)
+    for key in ("description",):
+        if getattr(interest, key):
+            table.add(key, getattr(interest, key))
+    for key in ("keywords", "require", "exclude", "authors"):
+        values = getattr(interest, key)
+        if values:
+            table.add(key, values)
+    return table
+
+
+def save_settings(
+    path: Path,
+    *,
+    categories: list[str],
+    interests: list[Interest],
+    values: dict[str, Any],
+) -> Config:
+    """Write categories, interests and top-level settings, keeping other comments.
+
+    Creates the config if it doesn't exist yet. Nothing is written unless the
+    result loads cleanly, so a bad form submission can't break the config.
+    """
+    if path.exists():
+        doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+    else:
+        output_dir = str(values.get("output_dir") or paths.default_output_dir())
+        doc = tomlkit.parse(render_template(categories or ["cs.LG"], output_dir, []))
+    unknown = set(values) - (TOP_LEVEL_KEYS - {"categories", "interest"})
+    _expect(not unknown, f"Unknown setting(s): {', '.join(sorted(unknown))}")
+    doc["categories"] = categories
+    for key, value in values.items():
+        doc[key] = value
+    aot = tomlkit.aot()
+    for interest in interests:
+        aot.append(_interest_table(interest))
+    doc["interest"] = aot
+    text = tomlkit.dumps(doc)
+    config = parse(text, path)  # raises ConfigError with a clear message
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return config
+
+
+def save_interests(path: Path, interests: list[Interest]) -> Config:
+    """Replace only the [[interest]] tables; everything else in the file is kept."""
+    doc, _ = _edit(path)
+    aot = tomlkit.aot()
+    for interest in interests:
+        aot.append(_interest_table(interest))
+    doc["interest"] = aot
+    return _save(path, doc)

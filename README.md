@@ -5,9 +5,11 @@ A daily digest of the new arXiv papers that match **your** research interests, w
 You describe what you care about: keywords, a sentence or two about a research idea, or authors you follow. `arxiv-digest run` then:
 1. fetches the papers newly announced in your arXiv categories
 2. ranks them against your interests on your own computer
-3. writes the best ones, with links and abstracts, to a daily Markdown file such as `digests/2026-11-03.md`
+3. writes the best ones, with links, abstracts and Claude's reasons, to `digests/2026-11-03.md` and `digests/2026-11-03.html`, and opens the HTML in your browser
 
-> **Status: v0.2, step 2 of 5.** A local model shortlists the day's papers. Claude then keeps only the genuinely relevant ones and explains why each was chosen. Coming next:
+Or run `arxiv-digest app` for the same thing in a browser window: browse past digests, run a new one, and edit your interests in forms.
+
+> **Status: v0.3.** A local model shortlists the day's papers, and Claude keeps only the genuinely relevant ones and explains why each was chosen. Every digest is written as Markdown and as HTML, and there's a local web app. Coming next:
 > - full-text summaries of the top picks
 > - an MCP server so Claude Desktop and Claude Code can use the digest directly
 
@@ -25,7 +27,8 @@ It runs on Python 3.11–3.14. If you only have 3.15, uv fetches a supported Pyt
 
 ```bash
 arxiv-digest init      # a few questions: categories, output folder, interests
-arxiv-digest run       # fetch, rank and write today's digest
+arxiv-digest run       # fetch, rank, write today's digest and open it
+arxiv-digest app       # or do all of this in the web app
 ```
 
 The first run downloads a small language model once (~90 MB) and covers arXiv's latest announcement. After that, each run picks up everything announced since the previous run (up to 7 days back), and a paper never appears in two digests.
@@ -37,7 +40,8 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | Command | What it does |
 |---|---|
 | `arxiv-digest init` | Create the config by answering a few questions |
-| `arxiv-digest run` | Write a digest of the papers that are new since the last run |
+| `arxiv-digest run` | Write a digest (Markdown and HTML) of the papers that are new since the last run, and open the HTML |
+| `arxiv-digest run --no-open` | The same, without opening the browser |
 | `arxiv-digest run --dry-run` | Print the digest instead of saving it, and remember nothing |
 | `arxiv-digest run --days 3` | Cover the last 3 days of submissions (papers already shown are skipped) |
 | `arxiv-digest run --include-seen` | Redo the latest announcement, including papers already shown (useful after editing interests) |
@@ -47,7 +51,8 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest categories add hep-th` | Watch another category (checked against arXiv's list) |
 | `arxiv-digest categories remove hep-th` | Stop watching a category |
 | `arxiv-digest interests` | Show your interests |
-| `arxiv-digest status` | File locations, papers seen, and the last run |
+| `arxiv-digest status` | File locations, papers seen, Claude's status, and the last run |
+| `arxiv-digest app [--port 8765]` | Open the web app in your browser |
 
 Every command accepts `--config PATH` to use a different config file.
 
@@ -127,13 +132,25 @@ uv run pytest           # fast and offline: fake arXiv responses and a fake mode
 uv run ruff check . && uv run ruff format --check .
 ```
 
+## Web app
+
+`arxiv-digest app` starts a small web server on your computer and opens it in your browser:
+
+- **Start page:** your interests, one line each. Click one to edit it in place, or add a new one. **Save interests** saves them; **Save and re-run the latest announcement** saves them and shows today's papers again, chosen for the updated interests.
+- **Digests:** every digest you've made, newest first. Each one opens in the same layout as the HTML file, with older/newer links.
+- **Run:** run today's digest from a button, with optional settings to include papers already shown or to skip Claude. Progress appears live, and the new digest opens when it finishes.
+- **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, and set the digest size and Claude model. Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
+
+The server only listens on `127.0.0.1`. It rejects requests addressed to any other host name, which blocks DNS-rebinding attacks from other sites open in your browser. Every form also carries a random token, so other websites can't submit changes for you. Stop it with Ctrl+C.
+
 ## Roadmap
 
 1. ✅ Core: config, fetching, local ranking, Markdown digest
 2. ✅ Claude ranking through the Claude Code CLI (`claude -p`): picks only relevant papers, up to the cap, with a "why it was chosen" line for each
-3. Deep read: Claude reads the full text of the top picks and summarizes the method and results
-4. MCP server, so Claude can browse, search and explain your digest
-5. PyPI release and a Claude Code plugin
+3. ✅ HTML digests (same content as the Markdown; math rendered with KaTeX) and the local web app
+4. Deep read: Claude reads the full text of the top picks and summarizes the method and results
+5. MCP server, so Claude can browse, search and explain your digest
+6. PyPI release and a Claude Code plugin
 
 ## License
 

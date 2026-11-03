@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from conftest import NOW, FakeClient, FakeEmbedder, make_paper
 
-from arxiv_digest.pipeline import RunOptions, digest_path, run_digest
+from arxiv_digest.pipeline import RunOptions, digest_paths, run_digest
 from arxiv_digest.store import Store
 
 
@@ -104,11 +104,29 @@ def test_without_model_ranks_by_keywords_and_authors(tmp_path, make_config):
     assert "keywords and followed authors only" in result.markdown
 
 
-def test_digest_path_numbers_repeat_days(tmp_path):
-    day = NOW
-    first = digest_path(tmp_path, day)
-    first.write_text("x")
-    assert digest_path(tmp_path, day).name == "2026-11-03-2.md"
+def test_digest_paths_number_repeat_days_and_keep_md_html_paired(tmp_path):
+    md, html = digest_paths(tmp_path, NOW)
+    assert (md.name, html.name) == ("2026-11-03.md", "2026-11-03.html")
+    html.write_text("x")  # even a lone .html blocks the name
+    md, html = digest_paths(tmp_path, NOW)
+    assert (md.name, html.name) == ("2026-11-03-2.md", "2026-11-03-2.html")
+
+
+def test_run_writes_html_and_saves_the_digest(tmp_path, make_config):
+    config = make_config()
+    store = Store(tmp_path / "db.sqlite3")
+    result = run_digest(
+        config, store, FakeClient(_papers()), FakeEmbedder(), log=lambda m: None, now=NOW
+    )
+    assert result.html_path.exists() and result.html_path.suffix == ".html"
+    assert result.html_path.stem == result.path.stem
+    html = result.html_path.read_text()
+    assert html.startswith("<!doctype html>")
+    assert 'href="https://arxiv.org/abs/2611.00003"' in html
+    saved, row = store.get_digest(result.digest_id)
+    assert row["html_path"] == str(result.html_path)
+    assert [e.paper.id for e in saved.entries] == [p.candidate.paper.id for p in result.picks]
+    assert store.list_digests()[0]["id"] == result.digest_id
 
 
 class FakeRanker:

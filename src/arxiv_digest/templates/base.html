@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}arxiv-digest{% endblock %}</title>
+{% block head %}{% endblock %}
+<style>
+{{ css }}
+</style>
+</head>
+<body>
+<nav class="topbar">
+  <a class="brand" href="/">arxiv-digest</a>
+  {% set path = request.url.path %}
+  <a href="/" class="{{ 'active' if path == '/' or path.startswith('/digest') }}">Digests</a>
+  <a href="/run" class="{{ 'active' if path == '/run' }}">Run{% if job.state == 'running' %} <span class="pulse" title="A run is in progress">●</span>{% endif %}</a>
+  <a href="/settings" class="{{ 'active' if path == '/settings' }}">Settings</a>
+</nav>
+{% block main %}{% endblock %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

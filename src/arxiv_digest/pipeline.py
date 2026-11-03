@@ -21,10 +21,12 @@ import numpy as np
 from .arxiv_api import ArxivClient, announcement_start
 from .claude_cli import ClaudeAnswer
 from .config import Config
+from .digest import Digest, build_digest
 from .embed import Embedder, EmbeddingUnavailable
+from .html_render import standalone_page
 from .models import Paper
 from .rank import ClaudeError, Pick, Ranker, local_picks
-from .render import DigestStats, render_digest
+from .render import render_markdown
 from .shortlist import Candidate, score_papers, select_locally, shortlist
 from .store import Store
 
@@ -52,20 +54,25 @@ class RunResult:
     shortlisted: list[Candidate] = field(default_factory=list)
     picks: list[Pick] = field(default_factory=list)
     claude: ClaudeAnswer | None = None
+    digest: Digest | None = None
     markdown: str | None = None
-    path: Path | None = None
+    html: str | None = None
+    path: Path | None = None  # the Markdown file
+    html_path: Path | None = None
+    digest_id: int | None = None
     notes: list[str] = field(default_factory=list)
 
 
-def digest_path(output_dir: Path, day: datetime) -> Path:
-    """YYYY-MM-DD.md, or YYYY-MM-DD-2.md etc. if that day already has a digest."""
-    base = output_dir / f"{day:%Y-%m-%d}.md"
-    number = 2
-    path = base
-    while path.exists():
-        path = output_dir / f"{day:%Y-%m-%d}-{number}.md"
+def digest_paths(output_dir: Path, day: datetime) -> tuple[Path, Path]:
+    """YYYY-MM-DD.md/.html, or YYYY-MM-DD-2.md/.html etc. if that day already has one."""
+    stem = f"{day:%Y-%m-%d}"
+    number = 1
+    while True:
+        name = stem if number == 1 else f"{stem}-{number}"
+        md, html = output_dir / f"{name}.md", output_dir / f"{name}.html"
+        if not md.exists() and not html.exists():
+            return md, html
         number += 1
-    return path
 
 
 def _embed(
@@ -196,22 +203,26 @@ def run_digest(
                     " followed authors."
                 )
 
-    generated = datetime.now().astimezone()
-    stats = DigestStats(
+    result.digest = build_digest(
+        config=config,
+        picks=result.picks,
         new_papers=len(new),
         shortlisted=len(result.shortlisted),
         window_start=result.window_start,
         window_end=result.window_end,
         ranked_by=ranked_by,
+        generated=datetime.now().astimezone(),
+        notes=notes,
     )
-    result.markdown = render_digest(
-        config=config, picks=result.picks, stats=stats, generated=generated, notes=notes
-    )
+    result.markdown = render_markdown(result.digest)
+    result.html = standalone_page(result.digest)
 
     if not options.dry_run:
         config.output_dir.mkdir(parents=True, exist_ok=True)
-        result.path = digest_path(config.output_dir, generated)
+        result.path, result.html_path = digest_paths(config.output_dir, result.digest.generated)
         result.path.write_text(result.markdown, encoding="utf-8")
+        result.html_path.write_text(result.html, encoding="utf-8")
+        result.digest_id = store.save_digest(result.digest, result.path, result.html_path)
         store.mark_seen(new)
         assert run_id is not None
         store.finish_run(
@@ -223,3 +234,31 @@ def run_digest(
         )
         store.prune()
     return result
+
+
+def run_with_config(
+    config: Config, options: RunOptions | None = None, *, log: Log = print
+) -> RunResult:
+    """Set up the real arXiv client, local model and Claude, then run (CLI and web app)."""
+    from . import paths
+    from .claude_cli import ClaudeCLI
+    from .embed import FastEmbedder
+    from .rank import ClaudeRanker
+
+    options = options or RunOptions()
+    store = Store(paths.database_path())
+    client = ArxivClient()
+    embedder = (
+        FastEmbedder(config.embedding_model, paths.model_cache_dir())
+        if options.use_embeddings
+        else None
+    )
+    ranker = None
+    if options.use_claude and config.use_claude:
+        cli = ClaudeCLI(config.claude_command, config.claude_model, timeout=config.claude_timeout)
+        ranker = ClaudeRanker(cli)
+    try:
+        return run_digest(config, store, client, embedder, options, ranker=ranker, log=log)
+    finally:
+        client.close()
+        store.close()

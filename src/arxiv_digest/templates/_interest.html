@@ -1,0 +1,27 @@
+<fieldset class="interest-edit{% if new %} new{% endif %}">
+  <legend>{% if new %}Add an interest{% else %}{{ interest.name or "Interest" }}{% endif %}</legend>
+  <label>Name
+    <input name="interest-{{ i }}-name" value="{{ interest.name }}" placeholder="e.g. Weak lensing">
+  </label>
+  <label>Description <span class="hint">a sentence or two, matched by meaning</span>
+    <textarea name="interest-{{ i }}-description" rows="2" placeholder="e.g. Cosmic shear and galaxy-galaxy lensing analyses">{{ interest.description }}</textarea>
+  </label>
+  <label>Keywords <span class="hint">comma-separated words or phrases</span>
+    <input name="interest-{{ i }}-keywords" value="{{ interest.keywords | join(', ') }}" placeholder="e.g. shear, intrinsic alignments">
+  </label>
+  <label>Authors to always include <span class="hint">comma-separated, "First Last"</span>
+    <input name="interest-{{ i }}-authors" value="{{ interest.authors | join(', ') }}" placeholder="e.g. Vera Rubin">
+  </label>
+  <details{% if interest.require or interest.exclude %} open{% endif %}>
+    <summary>Required and excluded words</summary>
+    <label>Require <span class="hint">every one must appear in the title or abstract</span>
+      <input name="interest-{{ i }}-require" value="{{ interest.require | join(', ') }}">
+    </label>
+    <label>Exclude <span class="hint">papers containing any of these are skipped</span>
+      <input name="interest-{{ i }}-exclude" value="{{ interest.exclude | join(', ') }}">
+    </label>
+  </details>
+  {% if not new %}
+  <label class="inline danger"><input type="checkbox" name="interest-{{ i }}-delete"> Remove this interest</label>
+  {% endif %}
+</fieldset>

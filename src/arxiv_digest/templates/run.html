@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Run · arxiv-digest{% endblock %}
+{% block main %}
+<main class="page">
+  <h1>Run</h1>
+  {% if job.state == 'idle' %}
+  <div class="card">
+    <p class="muted">Nothing is running. Start a new digest:</p>
+    {% include "_run_form.html" %}
+  </div>
+  {% else %}
+  <p id="status" class="status {{ job.state }}">
+    {% if job.state == 'running' %}Running…{% elif job.state == 'done' %}{{ job.message }}{% else %}Failed: {{ job.message }}{% endif %}
+  </p>
+  <pre id="log" class="log">{{ job.lines | join("\n") }}</pre>
+  <p id="actions">
+    {% if job.state == 'done' and job.digest_id %}<a class="button primary" href="/digest/{{ job.digest_id }}">Open the digest</a>{% endif %}
+  </p>
+  {% if job.state != 'running' %}
+  <div class="card">{% include "_run_form.html" %}</div>
+  {% endif %}
+  {% endif %}
+</main>
+{% endblock %}
+{% block scripts %}
+{% if job.state == 'running' %}
+<script>
+(function () {
+  const log = document.getElementById("log");
+  const status = document.getElementById("status");
+  const actions = document.getElementById("actions");
+  async function poll() {
+    let job;
+    try {
+      job = await (await fetch("/run/status", {cache: "no-store"})).json();
+    } catch (e) {
+      setTimeout(poll, 2000);
+      return;
+    }
+    log.textContent = job.lines.join("\n");
+    log.scrollTop = log.scrollHeight;
+    if (job.state === "running") {
+      setTimeout(poll, 1000);
+      return;
+    }
+    status.className = "status " + job.state;
+    status.textContent = job.state === "done" ? job.message : "Failed: " + job.message;
+    if (job.state === "done" && job.digest_id) {
+      const link = document.createElement("a");
+      link.className = "button primary";
+      link.href = "/digest/" + job.digest_id;
+      link.textContent = "Open the digest";
+      actions.appendChild(link);
+      setTimeout(function () { window.location.href = link.href; }, 1500);
+    }
+  }
+  poll();
+})();
+</script>
+{% endif %}
+{% endblock %}

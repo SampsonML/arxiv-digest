@@ -1,0 +1,96 @@
+/* arxiv-digest web app: navigation, pages and forms (the digest itself uses digest.css). */
+.topbar {
+  position: sticky; top: 0; z-index: 10; display: flex; gap: 1.2rem; align-items: center;
+  padding: .7rem 1.25rem; background: var(--card); border-bottom: 1px solid var(--border);
+}
+.topbar a { color: var(--muted); text-decoration: none; font-weight: 500; }
+.topbar a.active, .topbar a:hover { color: var(--fg); }
+.topbar .brand { color: var(--accent); font-weight: 700; margin-right: .8rem; }
+.pulse { color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+.page { max-width: 860px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+.page h1 { font-size: 1.6rem; margin: .5rem 0 1rem; }
+.page h2 { font-size: 1.2rem; margin: 2rem 0 .6rem; }
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 1rem 1.2rem; margin: 1rem 0;
+}
+.card-title { margin-top: 0 !important; }
+.welcome h1 { margin-top: 0; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.error, .success { border-radius: 6px; padding: .6rem .8rem; }
+.error { background: #fdecea; color: #8a1c13; border: 1px solid #f3b9b1; }
+.success { background: #e9f7ef; color: #1e6b3c; border: 1px solid #b6e2c6; }
+@media (prefers-color-scheme: dark) {
+  .error { background: #3a1714; color: #f4b4ab; border-color: #6b2a23; }
+  .success { background: #15301f; color: #9fdcb3; border-color: #275c3a; }
+}
+a.button, button {
+  display: inline-block; font: inherit; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; padding: .5rem 1rem;
+  background: var(--card); color: var(--fg); text-decoration: none;
+}
+a.button.primary, button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .6; cursor: default; }
+.run-form { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.run-form label { color: var(--muted); font-size: .92rem; }
+table.list { width: 100%; border-collapse: collapse; }
+table.list th, table.list td { text-align: left; padding: .5rem .4rem; border-bottom: 1px solid var(--border); }
+table.list th { color: var(--muted); font-weight: 500; font-size: .85rem; }
+table.list td.files code { font-size: .8rem; color: var(--muted); }
+.digest-nav {
+  max-width: 860px; margin: 0 auto; padding: 1rem 1.25rem 0; display: flex;
+  justify-content: space-between; font-size: .9rem;
+}
+.digest-nav a { color: var(--link); text-decoration: none; }
+.files-note { max-width: 860px; margin: -2rem auto 2rem; padding: 0 1.25rem; color: var(--muted); font-size: .8rem; }
+.status { font-weight: 600; }
+.status.done { color: #1e6b3c; }
+.status.error { color: #b3261e; }
+.log {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: .8rem; max-height: 50vh; overflow: auto; font-size: .82rem; white-space: pre-wrap;
+}
+form.settings label { display: block; margin: .6rem 0; font-weight: 500; }
+form.settings label.inline { display: flex; gap: .5rem; align-items: center; font-weight: normal; }
+form.settings .hint { color: var(--muted); font-weight: normal; font-size: .85rem; }
+form.settings input:not([type=checkbox]), form.settings textarea, form.settings select {
+  display: block; width: 100%; margin-top: .25rem; font: inherit; padding: .45rem .6rem;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg);
+}
+form.settings .row { display: flex; gap: 1rem; }
+form.settings .row label { flex: 1; }
+fieldset.interest-edit {
+  border: 1px solid var(--border); border-radius: 10px; padding: .4rem 1rem .8rem;
+  margin: 0 0 1rem; background: var(--card);
+}
+fieldset.interest-edit.new { border-style: dashed; }
+fieldset.interest-edit legend { font-weight: 600; padding: 0 .4rem; }
+fieldset.interest-edit details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+.danger { color: #b3261e; }
+.categories details {
+  border: 1px solid var(--border); border-radius: 8px; margin: .4rem 0; padding: .3rem .8rem;
+  background: var(--card);
+}
+.categories summary { cursor: pointer; font-weight: 600; }
+.categories .count { color: var(--accent); font-weight: normal; }
+.categories .checks { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 1rem; padding: .4rem 0; }
+.categories .checks label { display: block; margin: .15rem 0; font-weight: normal; font-size: .88rem; }
+@media (max-width: 640px) { .categories .checks { grid-template-columns: 1fr; } }
+.save { margin-top: 1.5rem; }
+.page a:not(.button) { color: var(--link); }
+/* Interests on the start page: one collapsible row each, editing in place. */
+.interest-row { border-top: 1px solid var(--border); padding: .55rem 0; }
+.interest-row:first-of-type { border-top: none; }
+.interest-row > summary {
+  cursor: pointer; list-style: none; display: flex; gap: .3rem; align-items: baseline;
+}
+.interest-row > summary::-webkit-details-marker { display: none; }
+.interest-row > summary .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.interest-row > summary .edit { margin-left: auto; color: var(--link); font-size: .88rem; }
+.interest-row[open] > summary .edit { visibility: hidden; }
+.interest-row.add > summary { color: var(--accent); }
+.interest-row fieldset.interest-edit { border: none; background: none; padding: .2rem 0 0; margin: 0; }
+.interest-row fieldset.interest-edit legend { display: none; }
+.interests-quick .buttons { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .8rem; }

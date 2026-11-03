@@ -6,6 +6,7 @@ papers      full metadata of recent papers (pruned after `retention_days`),
             for searching recent papers later
 embeddings  cached embedding vectors, keyed by paper and model
 runs        one row per run, for `status` and for working out what is new
+digests     every digest produced, as data, for the HTML views and web app
 """
 
 from __future__ import annotations
@@ -18,9 +19,10 @@ from pathlib import Path
 
 import numpy as np
 
+from .digest import Digest
 from .models import Paper
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen (
@@ -40,6 +42,15 @@ CREATE TABLE IF NOT EXISTS embeddings (
     model TEXT NOT NULL,
     vector BLOB NOT NULL,
     PRIMARY KEY (paper_id, model)
+);
+CREATE TABLE IF NOT EXISTS digests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generated TEXT NOT NULL,
+    picked INTEGER NOT NULL,
+    new INTEGER NOT NULL,
+    markdown_path TEXT,
+    html_path TEXT,
+    data TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +74,8 @@ class Store:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self.db = sqlite3.connect(path)
+        # The web app and the CLI may use the database at the same time.
+        self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
@@ -174,6 +186,40 @@ class Store:
         return self.db.execute(
             "SELECT * FROM runs WHERE finished IS NOT NULL ORDER BY id DESC LIMIT 1"
         ).fetchone()
+
+    # -- digests ------------------------------------------------------------
+
+    def save_digest(
+        self, digest: Digest, markdown_path: Path | None, html_path: Path | None
+    ) -> int:
+        with self.db:
+            cursor = self.db.execute(
+                "INSERT INTO digests (generated, picked, new, markdown_path, html_path, data)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    digest.generated.isoformat(),
+                    len(digest.entries),
+                    digest.new_papers,
+                    str(markdown_path) if markdown_path else None,
+                    str(html_path) if html_path else None,
+                    json.dumps(digest.to_dict()),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def list_digests(self, limit: int = 200) -> list[sqlite3.Row]:
+        """Newest first: id, generated, picked, new, markdown_path, html_path."""
+        return self.db.execute(
+            "SELECT id, generated, picked, new, markdown_path, html_path FROM digests"
+            " ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    def get_digest(self, digest_id: int) -> tuple[Digest, sqlite3.Row] | None:
+        row = self.db.execute("SELECT * FROM digests WHERE id = ?", (digest_id,)).fetchone()
+        if row is None:
+            return None
+        return Digest.from_dict(json.loads(row["data"])), row
 
     # -- housekeeping -------------------------------------------------------
 

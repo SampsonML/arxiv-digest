@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 from typing import Annotated
 
@@ -13,11 +14,9 @@ from rich.table import Table
 from . import __version__, paths
 from . import categories as cats
 from . import config as cfg
-from .arxiv_api import ArxivClient, ArxivError
+from .arxiv_api import ArxivError
 from .claude_cli import ClaudeCLI
-from .embed import FastEmbedder
-from .pipeline import RunOptions, run_digest
-from .rank import ClaudeRanker
+from .pipeline import RunOptions, run_with_config
 from .store import Store
 
 app = typer.Typer(
@@ -187,43 +186,28 @@ def run(
         bool,
         typer.Option("--no-claude", help="Choose papers on this computer only (no Claude)."),
     ] = False,
+    no_open: Annotated[
+        bool, typer.Option("--no-open", help="Don't open the HTML digest in the browser.")
+    ] = False,
     show: Annotated[
         bool, typer.Option("--print", help="Also print the digest to the terminal.")
     ] = False,
 ) -> None:
-    """Fetch new papers, rank them, and write today's digest."""
+    """Fetch new papers, rank them, write today's digest (Markdown and HTML) and open it."""
     conf = _load(config)
-    store = Store(paths.database_path())
-    client = ArxivClient()
-    embedder = None if no_model else FastEmbedder(conf.embedding_model, paths.model_cache_dir())
-    use_claude = conf.use_claude and not no_claude
-    ranker = (
-        ClaudeRanker(ClaudeCLI(conf.claude_command, conf.claude_model, timeout=conf.claude_timeout))
-        if use_claude
-        else None
-    )
     options = RunOptions(
         days=days,
         include_seen=include_seen,
         dry_run=dry_run,
         use_embeddings=not no_model,
-        use_claude=use_claude,
+        use_claude=conf.use_claude and not no_claude,
     )
     try:
-        result = run_digest(
-            conf,
-            store,
-            client,
-            embedder,
-            options,
-            ranker=ranker,
-            log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]"),
+        result = run_with_config(
+            conf, options, log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]")
         )
     except ArxivError as exc:
         _fail(str(exc))
-    finally:
-        client.close()
-        store.close()
 
     for note in result.notes:
         err.print(f"[yellow]Note:[/yellow] {escape(note)}")
@@ -236,7 +220,11 @@ def run(
         f" {len(result.picks)} picked"
     )
     if result.path:
-        err.print(f"[green]{summary}[/green] → {escape(str(result.path))}", soft_wrap=True)
+        err.print(f"[green]{summary}[/green]")
+        err.print(f"  Markdown: {escape(str(result.path))}")
+        err.print(f"  HTML:     {escape(str(result.html_path))}")
+        if result.html_path and not no_open:
+            webbrowser.open(result.html_path.as_uri())
     else:
         err.print(f"[green]{summary}[/green] (dry run: nothing saved)")
 
@@ -288,6 +276,36 @@ def categories_remove(
         out.print(f"Removed {', '.join(removed)}. Now watching: {', '.join(conf.categories)}")
     else:
         out.print(f"None of those were watched. Watching: {', '.join(conf.categories)}")
+
+
+# ---------------------------------------------------------------------------
+# web app
+
+
+@app.command("app")
+def web_app(
+    config: ConfigOption = None,
+    port: Annotated[int, typer.Option(help="Port on 127.0.0.1 to serve the app on.")] = 8765,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Don't open the app in the browser.")
+    ] = False,
+) -> None:
+    """Open the web app: browse digests, run a new one, and edit settings."""
+    import socket
+    import threading
+
+    import uvicorn
+
+    from .webapp import create_app
+
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            _fail(f"Port {port} is already in use (is the app already open?). Try --port 8766.")
+    url = f"http://127.0.0.1:{port}/"
+    out.print(f"arxiv-digest is running at [bold]{url}[/bold] (press Ctrl+C to stop)")
+    if not no_browser:
+        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+    uvicorn.run(create_app(_config_path(config)), host="127.0.0.1", port=port, log_level="warning")
 
 
 # ---------------------------------------------------------------------------
