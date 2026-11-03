@@ -13,13 +13,19 @@ Or run `arxiv-digest app` for the same thing in a browser window: browse past di
 
 ## Install
 
-arxiv-digest needs [uv](https://docs.astral.sh/uv/). It isn't on PyPI yet; from a clone of this repository:
+You need Python 3.11–3.14. For Claude's picks, explanations and deep reads, you also need [Claude Code](https://claude.com/claude-code) signed in with your Claude account. arxiv-digest isn't on PyPI yet, so install it from a clone of this repository with any one of:
 
 ```bash
-uv tool install .          # puts `arxiv-digest` on your PATH
+uv tool install .            # with uv (recommended: it picks a supported Python for you)
+pipx install .               # with pipx
+python3 -m pip install .     # with plain pip, ideally in a virtual environment
 ```
 
-It runs on Python 3.11–3.14. If you only have 3.15, uv fetches a supported Python automatically. 3.15 is excluded for now because the local model's runtime (onnxruntime) has no 3.15 build yet.
+uv isn't required. It's just the easiest option. If your `python3` is 3.15 (or older than 3.11), pip and pipx will refuse to install, because the local model's runtime (onnxruntime) has no 3.15 build yet. In that case either:
+- use uv, which fetches a supported Python automatically, or
+- point pipx at a supported one: `pipx install --python python3.13 .`
+
+Contributors use uv to run the tests (see [Development](#development)).
 
 ## Quick start
 
