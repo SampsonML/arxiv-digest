@@ -15,6 +15,12 @@
 curl -LsSf https://raw.githubusercontent.com/SampsonML/arxiv-digest/main/install.sh | sh
 ```
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Demo: the curl install, setting up two astro interests, a digest with Claude's picks and a full-text deep read, then Find something weird" width="800">
+</p>
+
+<p align="center"><sub>Install, set up two interests, run a digest, then Find something weird (waiting sped up).</sub></p>
+
 ## Install
 
 The command above is the recommended way to install, on macOS and Linux. **On Windows**, open PowerShell and run
