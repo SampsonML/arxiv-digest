@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import webbrowser
 from pathlib import Path
 from typing import Annotated
@@ -289,23 +290,101 @@ def web_app(
     no_browser: Annotated[
         bool, typer.Option("--no-browser", help="Don't open the app in the browser.")
     ] = False,
+    idle_exit: Annotated[
+        int,
+        typer.Option(
+            "--idle-exit",
+            help="Stop after this many seconds with no open app tab (0: run until stopped).",
+        ),
+    ] = 0,
 ) -> None:
     """Open the web app: browse digests, run a new one, and edit settings."""
-    import socket
     import threading
 
     import uvicorn
 
+    from . import launcher
     from .webapp import create_app
 
-    with socket.socket() as probe:
-        if probe.connect_ex(("127.0.0.1", port)) == 0:
-            _fail(f"Port {port} is already in use (is the app already open?). Try --port 8766.")
-    url = f"http://127.0.0.1:{port}/"
-    out.print(f"arxiv-digest is running at [bold]{url}[/bold] (press Ctrl+C to stop)")
+    url = launcher.app_url(port)
+    state = launcher.server_status(port)
+    if state == "ours":
+        out.print(f"arxiv-digest is already running at [bold]{url}[/bold]")
+        if not no_browser:
+            webbrowser.open(url)
+        return
+    if state == "other":
+        _fail(f"Port {port} is used by another program. Try --port {port + 1}.")
+    web = create_app(_config_path(config), idle_exit=idle_exit or None)
+    server = uvicorn.Server(uvicorn.Config(web, host="127.0.0.1", port=port, log_level="warning"))
+
+    def stop() -> None:  # the Quit button and the idle timer
+        server.should_exit = True
+
+    web.state.on_quit = stop
+    out.print(f"arxiv-digest is running at [bold]{url}[/bold] (Quit in the app, or Ctrl+C)")
     if not no_browser:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
-    uvicorn.run(create_app(_config_path(config)), host="127.0.0.1", port=port, log_level="warning")
+    server.run()
+
+
+@app.command("open")
+def open_command(
+    config: ConfigOption = None,
+    port: Annotated[int, typer.Option(help="Port on 127.0.0.1 to serve the app on.")] = 8765,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Start the app but don't open the browser.")
+    ] = False,
+) -> None:
+    """Open the web app, starting it in the background if needed (what the launcher runs).
+
+    A background app stops by itself 10 minutes after its last tab is closed.
+    """
+    from . import launcher
+
+    explicit = config.expanduser() if config else None
+    try:
+        url, started = launcher.open_app(port, explicit, browser=not no_browser)
+    except launcher.LauncherError as exc:
+        _fail(str(exc))
+    out.print(("Started" if started else "Already running") + f" at {url}")
+
+
+shortcut_app = typer.Typer(help="Add or remove the arxiv-digest entry in your app launcher.")
+app.add_typer(shortcut_app, name="shortcut")
+
+
+@shortcut_app.command("install")
+def shortcut_install(config: ConfigOption = None) -> None:
+    """Add "arxiv-digest" (with its test-tube icon) to your system's app launcher."""
+    from . import launcher
+
+    explicit = config.expanduser().resolve() if config else None
+    if explicit is None and os.environ.get("ARXIV_DIGEST_CONFIG"):
+        explicit = paths.config_path().resolve()
+    try:
+        created = launcher.install_shortcut(explicit)
+    except (launcher.LauncherError, OSError) as exc:
+        _fail(str(exc))
+    out.print("[green]Added arxiv-digest to your app launcher.[/green]")
+    for path in created:
+        out.print(f"  {escape(str(path))}")
+    out.print(
+        "It opens the app in your browser, starting it in the background when needed."
+        f"\nIt runs: [dim]{escape(' '.join(launcher.launch_command(explicit)))}[/dim]"
+    )
+
+
+@shortcut_app.command("remove")
+def shortcut_remove() -> None:
+    """Remove the arxiv-digest entry from your app launcher."""
+    from . import launcher
+
+    removed = launcher.remove_shortcut()
+    if removed:
+        out.print("Removed " + ", ".join(escape(str(p)) for p in removed))
+    else:
+        out.print("No launcher entry to remove.")
 
 
 # ---------------------------------------------------------------------------

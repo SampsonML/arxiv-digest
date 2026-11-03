@@ -264,3 +264,17 @@ body:not(.has-bg) .page > h1, body:not(.has-bg) .digest header { text-shadow: no
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* -- app icon, quit, stopped ---------------------------------------------------- */
+.topbar .brand { display: inline-flex; align-items: center; gap: .5rem; }
+.brand-icon { width: 1.5rem; height: 1.5rem; border-radius: 7px; box-shadow: 0 0 12px rgba(79, 193, 201, .25); }
+.quit-form { margin-left: auto; }
+.topbar button.quit { padding: .3rem .8rem; font-size: .85rem; font-weight: 500; color: var(--muted); }
+.topbar button.quit:hover { color: var(--fg); }
+.stopped-banner {
+  position: sticky; top: 3.2rem; z-index: 15; max-width: 920px; margin: .6rem auto 0; padding: .55rem .9rem;
+  border-radius: 10px; background: #3a1714e6; color: #f4b4ab; border: 1px solid #6b2a23; font-size: .9rem;
+}
+.stopped-banner[hidden] { display: none; }
+.hero.stopped { text-align: center; padding: 2.6rem 1.5rem; margin-top: 12vh; }
+.stopped-icon { width: 88px; height: 88px; border-radius: 22px; margin-bottom: .6rem; box-shadow: 0 0 40px rgba(79, 193, 201, .3); }

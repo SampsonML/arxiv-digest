@@ -52,7 +52,9 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest categories remove hep-th` | Stop watching a category |
 | `arxiv-digest interests` | Show your interests |
 | `arxiv-digest status` | File locations, papers seen, Claude's status, and the last run |
-| `arxiv-digest app [--port 8765]` | Open the web app in your browser |
+| `arxiv-digest app [--port 8765]` | Run the web app in this terminal and open it in your browser |
+| `arxiv-digest open` | Open the web app, starting it in the background if needed (what the launcher entry runs) |
+| `arxiv-digest shortcut install` / `remove` | Add or remove "arxiv-digest" in your system's app launcher |
 
 Every command accepts `--config PATH` to use a different config file.
 
@@ -136,6 +138,28 @@ uv run ruff check . && uv run ruff format --check .
 ```
 
 ## Web app
+
+### Opening it without a terminal
+
+```bash
+arxiv-digest shortcut install
+```
+
+This adds **arxiv-digest**, with a test-tube icon, to your app launcher:
+
+| Platform | Where it goes | Tested |
+|---|---|---|
+| Linux | `~/.local/share/applications`, so it appears in GNOME, KDE, Omarchy and similar launchers | yes |
+| macOS | `~/Applications/arxiv-digest.app` (Spotlight, Launchpad) | no |
+| Windows | the Start menu | no |
+
+Clicking it starts the app in the background, with no terminal window, and opens it in your browser. If it's already running, clicking just opens it again.
+
+A background app stops by itself 10 minutes after you close its last tab, never during a run. You can also stop it any time with **Quit** in the top bar.
+
+The entry runs the same Python environment you ran `shortcut install` from. If you reinstall arxiv-digest somewhere else, run `shortcut install` again. Remove the entry with `arxiv-digest shortcut remove`.
+
+### What's in it
 
 `arxiv-digest app` starts a small web server on your computer and opens it in your browser:
 

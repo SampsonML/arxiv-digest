@@ -396,6 +396,59 @@ class SettingsForm:
 
 
 # ---------------------------------------------------------------------------
+# Stopping when nobody is using the app
+
+
+class Activity:
+    """When the app last received a request (pages, polling, heartbeats)."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock
+        self.last = clock()
+
+    def touch(self) -> None:
+        self.last = self.clock()
+
+    def idle_for(self) -> float:
+        return self.clock() - self.last
+
+
+class ActivityTracker:
+    """ASGI middleware that records every HTTP request as activity."""
+
+    def __init__(self, app: Any, activity: Activity) -> None:
+        self.app = app
+        self.activity = activity
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        # Health checks (from launchers or monitoring) don't count as someone using the app.
+        if scope["type"] == "http" and scope.get("path") != "/health":
+            self.activity.touch()
+        await self.app(scope, receive, send)
+
+
+def should_stop(idle_seconds: float, limit: float, busy: bool) -> bool:
+    return not busy and idle_seconds >= limit
+
+
+def _idle_watchdog(
+    app: Any,
+    activity: Activity,
+    limit: float,
+    busy: Callable[[], bool],
+    stop: Callable[[], None],
+) -> None:
+    check_every = max(1.0, min(30.0, limit / 4))
+    while not app.state.stopping:
+        time.sleep(check_every)
+        if busy():
+            activity.touch()  # a long run counts as use
+        elif should_stop(activity.idle_for(), limit, False):
+            stop()
+            return
+
+
+# ---------------------------------------------------------------------------
 # The app
 
 
@@ -405,10 +458,15 @@ def create_app(
     run: RunFunction = _default_run,
     token: str | None = None,
     account: ClaudeAccount | None = None,
+    idle_exit: float | None = None,
 ) -> Starlette:
+    """The app. With `idle_exit` (seconds), it asks to stop once no tab has been
+    open for that long (open tabs send a heartbeat every minute); the server
+    supplies the stop function as `app.state.on_quit`."""
     config_path = config_path or paths.config_path()
     csrf_token = token or secrets.token_urlsafe(32)
     runner = Runner(run)
+    activity = Activity()
 
     def current_cli() -> ClaudeCLI:
         conf, _ = load_config()
@@ -620,6 +678,47 @@ def create_app(
     async def run_status(request: Request) -> Response:
         return JSONResponse(job_status())
 
+    async def health(request: Request) -> Response:
+        return JSONResponse({"app": "arxiv-digest", "version": __version__})
+
+    async def heartbeat(request: Request) -> Response:
+        return Response(status_code=204)  # the activity tracker has noted the request
+
+    icon_svg = assets.joinpath("icons", "arxiv-digest.svg").read_bytes()
+
+    async def icon(request: Request) -> Response:
+        return Response(
+            icon_svg, media_type="image/svg+xml", headers={"Cache-Control": "max-age=86400"}
+        )
+
+    def busy() -> bool:
+        return runner.job.state == "running" or getattr(account, "login_running", False)
+
+    def stop_soon() -> None:
+        """Stop after the current response has been sent."""
+        quit_hook = getattr(app.state, "on_quit", None)
+        app.state.stopping = True
+        if quit_hook is not None:
+            timer = threading.Timer(0.5, quit_hook)
+            timer.daemon = True
+            timer.start()
+
+    async def quit_app(request: Request) -> Response:
+        if not await check_csrf(request):
+            return Response("Invalid or missing form token; reload the page.", status_code=403)
+        if busy():
+            return page(
+                "message.html",
+                request,
+                409,
+                title="Still working",
+                message=(
+                    "A run (or a Claude sign-in) is in progress. Quit again when it has finished."
+                ),
+            )
+        stop_soon()
+        return page("stopped.html", request)
+
     async def font(request: Request) -> Response:
         name = request.path_params["name"]
         if not FONT_FILE.match(name):
@@ -713,6 +812,10 @@ def create_app(
             Route("/run", start_run, methods=["POST"]),
             Route("/run", run_page, methods=["GET"]),
             Route("/run/status", run_status),
+            Route("/health", health),
+            Route("/heartbeat", heartbeat),
+            Route("/icon.svg", icon),
+            Route("/quit", quit_app, methods=["POST"]),
             Route("/background", background),
             Route("/fonts/{name}", font),
             Route("/claude", claude_login_page, methods=["GET"]),
@@ -723,9 +826,17 @@ def create_app(
         ],
         middleware=[
             Middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"]),
+            Middleware(ActivityTracker, activity=activity),
         ],
     )
     app.state.runner = runner
+    app.state.stopping = False
+    app.state.activity = activity
+    if idle_exit:
+        watchdog = threading.Thread(
+            target=_idle_watchdog, args=(app, activity, idle_exit, busy, stop_soon), daemon=True
+        )
+        watchdog.start()
     app.state.account = account
     app.state.csrf = csrf_token
     return app

@@ -4,20 +4,45 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}arxiv-digest{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
 {% block head %}{% endblock %}
 <style>
 {{ css }}
 </style>
 </head>
 <body{% if background_url %} class="has-bg" style="--bg-image: url('{{ background_url }}')"{% endif %}>
+{% block nav %}
 <nav class="topbar">
-  <a class="brand" href="/">arxiv-digest</a>
+  <a class="brand" href="/"><img class="brand-icon" src="/icon.svg" alt=""> arxiv-digest</a>
   {% set path = request.url.path %}
   <a href="/" class="{{ 'active' if path == '/' or path.startswith('/digest') }}">Digests</a>
   <a href="/run" class="{{ 'active' if path == '/run' }}">Run{% if job.state == 'running' %} <span class="pulse" title="A run is in progress">●</span>{% endif %}</a>
   <a href="/settings" class="{{ 'active' if path == '/settings' }}">Settings</a>
+  <form method="post" action="/quit" class="quit-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="quit" title="Stop arxiv-digest (open it again from your app launcher)">Quit</button>
+  </form>
 </nav>
+{% endblock %}
+<div id="stopped-banner" class="stopped-banner" hidden>arxiv-digest has stopped. Open it again from your app launcher, or run <code>arxiv-digest app</code>.</div>
 {% block main %}{% endblock %}
 {% block scripts %}{% endblock %}
+{% block heartbeat %}
+<script>
+/* Tell the app this tab is still open, so a background app stays running while you use it. */
+(function () {
+  const banner = document.getElementById("stopped-banner");
+  async function beat() {
+    try {
+      const r = await fetch("/heartbeat", {cache: "no-store"});
+      banner.hidden = r.ok;
+    } catch (e) {
+      banner.hidden = false;
+    }
+  }
+  setInterval(beat, 60000);
+})();
+</script>
+{% endblock %}
 </body>
 </html>

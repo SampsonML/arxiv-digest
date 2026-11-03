@@ -508,3 +508,63 @@ def test_greeting_and_time_ago():
     assert time_ago(morning - timedelta(hours=5), morning) == "5 hours ago"
     assert time_ago(morning - timedelta(days=1, hours=2), morning) == "yesterday"
     assert time_ago(morning - timedelta(days=4), morning) == "4 days ago"
+
+
+def test_health_heartbeat_and_icon(config_path):
+    client, _ = _client(config_path)
+    assert client.get("/health").json()["app"] == "arxiv-digest"
+    assert client.get("/heartbeat").status_code == 204
+    icon = client.get("/icon.svg")
+    assert icon.headers["content-type"].startswith("image/svg+xml") and b"<svg" in icon.content
+    page = client.get("/").text
+    assert 'rel="icon"' in page and 'action="/quit"' in page and "/heartbeat" in page
+
+
+def test_quit_stops_the_server_after_responding(config_path):
+    stopped = threading.Event()
+    client, app = _client(config_path)
+    app.state.on_quit = stopped.set
+    assert client.post("/quit", data={}).status_code == 403
+    page = client.post("/quit", data={"csrf": TOKEN})
+    assert page.status_code == 200 and "arxiv-digest has stopped" in page.text
+    assert 'action="/quit"' not in page.text  # no nav on the stopped page
+    assert stopped.wait(3)
+
+
+def test_quit_waits_for_a_run(config_path):
+    release = threading.Event()
+
+    def slow_run(conf, options, log):
+        release.wait(5)
+        return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
+
+    client, app = _client(config_path, run=slow_run)
+    app.state.on_quit = lambda: None
+    client.post("/run", data={"csrf": TOKEN})
+    page = client.post("/quit", data={"csrf": TOKEN})
+    assert page.status_code == 409 and "in progress" in page.text
+    release.set()
+    app.state.runner.thread.join(5)
+
+
+def test_idle_rules_and_watchdog(config_path):
+    from arxiv_digest.webapp import should_stop
+
+    assert should_stop(700, 600, busy=False)
+    assert not should_stop(100, 600, busy=False)
+    assert not should_stop(10_000, 600, busy=True)
+
+    stopped = threading.Event()
+    app = create_app(config_path, run=_no_run, token=TOKEN, account=FakeAccount(), idle_exit=1)
+    app.state.on_quit = stopped.set
+    assert stopped.wait(5)  # nobody is using it, so it asks to stop
+
+
+def test_health_checks_do_not_count_as_activity(config_path):
+    client, app = _client(config_path)
+    activity = app.state.activity
+    activity.last = activity.clock() - 500
+    client.get("/health")
+    assert activity.idle_for() >= 500
+    client.get("/heartbeat")
+    assert activity.idle_for() < 5
