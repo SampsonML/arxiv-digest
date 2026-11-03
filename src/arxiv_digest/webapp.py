@@ -60,9 +60,15 @@ RunFunction = Callable[[cfg.Config, RunOptions, Callable[[str], None]], RunResul
 
 def _default_run(config: cfg.Config, options: RunOptions, log: Callable[[str], None]) -> RunResult:
     progress = getattr(log, "step", None)  # the Runner's reporter tracks steps too
+    if options.mode == "weird":
+        from .weird import run_weird_with_config
+
+        run = run_weird_with_config
+    else:
+        run = run_with_config
     if progress is None:
-        return run_with_config(config, options, log=log)
-    return run_with_config(config, options, log=log, progress=progress)
+        return run(config, options, log=log)
+    return run(config, options, log=log, progress=progress)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +86,7 @@ class Job:
     counts: dict[str, int | None] = field(default_factory=dict)
     claude_used: bool = False
     deep_used: bool = False
+    mode: str = "digest"  # or "weird" (Find something weird)
 
 
 class _Reporter:
@@ -122,7 +129,7 @@ class Runner:
         with self._lock:
             if self.job.state == "running":
                 return False
-            self.job = Job(state="running", started=datetime.now())
+            self.job = Job(state="running", started=datetime.now(), mode=options.mode)
             job = self.job
         self.thread = threading.Thread(target=self._work, args=(job, config, options), daemon=True)
         self.thread.start()
@@ -145,7 +152,16 @@ class Runner:
             picked=len(result.picks),
         )
         if result.digest is None:
-            job.message = "No new papers since the last run."
+            job.message = (
+                "No papers in the latest announcement."
+                if job.mode == "weird"
+                else "No new papers since the last run."
+            )
+        elif job.mode == "weird":
+            job.message = (
+                f"{len(result.new_papers)} papers · {len(result.shortlisted)} most unusual"
+                f" · {len(result.picks)} weird ones picked"
+            )
         else:
             job.message = (
                 f"{len(result.new_papers)} new papers · {len(result.shortlisted)} shortlisted"
@@ -568,25 +584,27 @@ def create_app(
                 "new": row["new"],
                 "markdown_path": row["markdown_path"],
                 "html_path": row["html_path"],
+                "weird": row["kind"] == "weird",
             }
             for row in rows
         ]
+        latest_row = next((row for row in rows if row["kind"] != "weird"), None)
         now = datetime.now().astimezone()
         hero: dict[str, Any] = {
             "greeting": greeting(now),
             "today": f"{now:%A} {now.day} {now:%B}",
             "latest": None,
         }
-        if rows:
+        if latest_row is not None:  # the header shows your latest interest digest
             store = Store(paths.database_path())
             try:
-                found = store.get_digest(rows[0]["id"])
+                found = store.get_digest(latest_row["id"])
             finally:
                 store.close()
             if found:
                 latest, _ = found
                 hero["latest"] = {
-                    "id": rows[0]["id"],
+                    "id": latest_row["id"],
                     "new": latest.new_papers,
                     "shortlisted": latest.shortlisted,
                     "picked": len(latest.entries),
@@ -729,6 +747,22 @@ def create_app(
         runner.start(conf, options)  # if one is already running, just show it
         return RedirectResponse("/run", status_code=303)
 
+    async def start_weird(request: Request) -> Response:
+        """Find something weird: the 5 most unusual papers in the latest announcement."""
+        if not await check_csrf(request):
+            return Response("Invalid or missing form token; reload the page.", status_code=403)
+        conf, problem = load_config()
+        if conf is None:
+            return RedirectResponse("/settings", status_code=303)
+        form = await request.form()
+        options = RunOptions(
+            mode="weird",
+            use_claude=form.get("use_claude") == "on",
+            deep_read=form.get("deep_read") == "on",
+        )
+        runner.start(conf, options)
+        return RedirectResponse("/run", status_code=303)
+
     def job_status() -> dict[str, Any]:
         job = runner.job
         return {
@@ -737,6 +771,7 @@ def create_app(
             "counts": dict(job.counts),
             "claude_used": job.claude_used,
             "deep_used": job.deep_used,
+            "mode": job.mode,
             "lines": list(job.lines),
             "digest_id": job.digest_id,
             "message": job.message,
@@ -888,6 +923,7 @@ def create_app(
             Route("/digest/{digest_id:int}", show_digest),
             Route("/digest/{digest_id:int}/save/{kind}", save_digest),
             Route("/run", start_run, methods=["POST"]),
+            Route("/weird", start_weird, methods=["POST"]),
             Route("/run", run_page, methods=["GET"]),
             Route("/run/status", run_status),
             Route("/health", health),

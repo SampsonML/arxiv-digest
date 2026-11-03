@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -51,6 +52,15 @@ class Interest:
     require: list[str] = field(default_factory=list)  # every term must appear
     exclude: list[str] = field(default_factory=list)  # any term rules the paper out
     authors: list[str] = field(default_factory=list)  # always include their papers
+    # Extra search terms Claude suggested for this interest (not in the config
+    # file; filled in for a run, see expand.py). They count like keywords.
+    search_terms: list[str] = field(default_factory=list)
+
+    @property
+    def all_keywords(self) -> list[str]:
+        """The user's keywords plus Claude's search terms, without duplicates."""
+        seen = {k.casefold() for k in self.keywords}
+        return self.keywords + [t for t in self.search_terms if t.casefold() not in seen]
 
     @property
     def has_topic(self) -> bool:
@@ -65,6 +75,8 @@ class Interest:
             parts.append(self.description.strip())
         if self.keywords:
             parts.append("Keywords: " + ", ".join(self.keywords))
+        if self.search_terms:
+            parts.append("Related terms: " + ", ".join(self.search_terms))
         return ". ".join(parts)
 
 
@@ -88,6 +100,29 @@ class Config:
     deep_reads: int = 3  # top picks Claude reads in full (0: none)
     deep_read_model: str = DEEP_READ_MODEL
     app_background: str = "default"  # "default", "none", or a path to an image
+
+
+def selection_fingerprint(config: Config) -> str:
+    """Identifies what a run looks for: the categories and every interest's terms.
+
+    Papers considered under a different fingerprint are considered again, so
+    changing interests or categories never hides papers that were not shown.
+    """
+    interests = sorted(
+        json.dumps(
+            [
+                i.name,
+                i.description.strip(),
+                sorted(i.keywords),
+                sorted(i.require),
+                sorted(i.exclude),
+                sorted(i.authors),
+            ]
+        )
+        for i in config.interests
+    )
+    text = json.dumps([sorted(config.categories), interests])
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def _expect(cond: bool, message: str) -> None:

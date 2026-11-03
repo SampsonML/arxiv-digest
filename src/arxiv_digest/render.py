@@ -48,15 +48,27 @@ def _authors(authors: Sequence[str], followed: Sequence[str]) -> str:
 
 
 def evidence_parts(
-    evidence: Evidence | None, interest: str, relevance: int | None, *, with_interest: bool
+    evidence: Evidence | None,
+    interest: str,
+    relevance: int | None,
+    *,
+    with_interest: bool,
+    weird: bool = False,
 ) -> list[str]:
     """The pieces of the "Matched" line (shared with the HTML view)."""
     parts = []
     if with_interest:
         parts.append(interest)
     if relevance is not None:
-        parts.append(f"relevance {relevance}/10")
+        parts.append(f"{'weirdness' if weird else 'relevance'} {relevance}/10")
     if evidence is None:
+        return parts
+    if weird:  # "Find something weird": how isolated the paper is
+        if evidence.rank is not None and evidence.of is not None:
+            text = f"#{evidence.rank} most unusual of {evidence.of}"
+            if evidence.similarity is not None:
+                text += f" (similarity to its nearest neighbours {evidence.similarity:.2f})"
+            parts.append(text)
         return parts
     if evidence.authors:
         parts.append("followed author: " + ", ".join(evidence.authors))
@@ -92,7 +104,15 @@ def deep_read_source(entry: Entry) -> str:
     return f"Claude read the full text ({read.source}{', cut short' if read.truncated else ''})"
 
 
-def _deep_read(entry: Entry) -> list[str]:
+def why_label(weird: bool) -> str:
+    return "Why it's weird" if weird else "Why"
+
+
+def deep_why_label(weird: bool) -> str:
+    return "Why it's weird" if weird else "Why it matters"
+
+
+def _deep_read(entry: Entry, weird: bool) -> list[str]:
     read = entry.deep_read
     assert read is not None
     return [
@@ -100,12 +120,12 @@ def _deep_read(entry: Entry) -> list[str]:
         "",
         f"- **Method:** {_safe(read.method)}",
         f"- **Results:** {_safe(read.results)}",
-        f"- **Why it matters:** {_safe(read.why)}",
+        f"- **{deep_why_label(weird)}:** {_safe(read.why)}",
         "",
     ]
 
 
-def _entry(entry: Entry, heading: str, *, with_interest: bool) -> list[str]:
+def _entry(entry: Entry, heading: str, *, with_interest: bool, weird: bool = False) -> list[str]:
     paper = entry.paper
     lines = [
         f"{heading} {_safe(paper.title)}",
@@ -116,17 +136,18 @@ def _entry(entry: Entry, heading: str, *, with_interest: bool) -> list[str]:
         "",
     ]
     if entry.why:
-        lines += [f"**Why:** {_safe(entry.why)}", ""]
+        lines += [f"**{why_label(weird)}:** {_safe(entry.why)}", ""]
     if entry.deep_read:
-        lines += _deep_read(entry)
+        lines += _deep_read(entry, weird)
     parts = evidence_parts(
-        entry.evidence, entry.interest, entry.relevance, with_interest=with_interest
+        entry.evidence, entry.interest, entry.relevance, with_interest=with_interest, weird=weird
     )
     if with_interest and parts:
         parts[0] = f"*{parts[0]}*"
     if parts:
         # With Claude's explanation present, the local evidence is a quieter footnote.
-        label = "*Matched:*" if entry.why else "**Matched:**"
+        word = "Found" if weird else "Matched"
+        label = f"*{word}:*" if entry.why else f"**{word}:**"
         lines += [f"{label} " + " · ".join(parts), ""]
     lines += [
         "<details><summary>Abstract</summary>",
@@ -144,6 +165,12 @@ def window_text(start: datetime, end: datetime) -> str:
 
 
 def stats_text(digest: Digest) -> str:
+    if digest.weird:
+        return (
+            f"{digest.new_papers} papers in the latest announcement in"
+            f" {', '.join(digest.categories)} · {digest.shortlisted} most unusual"
+            f" · {len(digest.entries)} picked"
+        )
     return (
         f"{digest.new_papers} new papers in {', '.join(digest.categories)}"
         f" · {digest.shortlisted} shortlisted · {len(digest.entries)} picked"
@@ -157,18 +184,30 @@ def footer_text(digest: Digest) -> str:
     )
 
 
+def top_heading(digest: Digest) -> str:
+    return "🌀 The weird ones" if digest.weird else "⭐ Top picks"
+
+
+def empty_text(digest: Digest) -> str:
+    if digest.weird:
+        return "Nothing weird turned up this time."
+    return "No new papers matched your interests this time."
+
+
 def render_markdown(digest: Digest) -> str:
     lines = [f"# {digest.title}", "", stats_text(digest), "", f"> {digest.ranked_by}", ""]
     for note in digest.notes:
         lines += [f"> **Note:** {note}", ""]
 
     if not digest.entries:
-        lines += ["No new papers matched your interests this time.", ""]
+        lines += [empty_text(digest), ""]
     else:
         if digest.top:
-            lines += ["## ⭐ Top picks", ""]
+            lines += [f"## {top_heading(digest)}", ""]
             for number, entry in enumerate(digest.top, start=1):
-                lines += _entry(entry, f"### {number}.", with_interest=True)
+                lines += _entry(
+                    entry, f"### {number}.", with_interest=not digest.weird, weird=digest.weird
+                )
         for interest, entries in digest.groups():
             lines += [f"## {interest} ({len(entries)})", ""]
             for entry in entries:

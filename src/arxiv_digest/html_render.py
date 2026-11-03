@@ -18,10 +18,14 @@ from .render import (
     MAX_AUTHORS,
     author_list,
     deep_read_source,
+    deep_why_label,
+    empty_text,
     evidence_parts,
     footer_text,
     short_comment,
     stats_text,
+    top_heading,
+    why_label,
 )
 
 KATEX_VERSION = "0.19.1"
@@ -81,6 +85,7 @@ def _authors(entry: Entry) -> str:
 # Interest colours, taken from the night sky: copper, teal, amber, violet, rose,
 # azure, moss. Each interest keeps its colour across a digest (config order).
 INTEREST_COLORS = ["#e3925a", "#4fc1c9", "#e6c15c", "#a58bf2", "#ec8aa8", "#6fa8f5", "#9fc46a"]
+WEIRD_COLOR = "#a58bf2"  # violet, for "Find something weird" digests
 
 
 def interest_colors(names: list[str]) -> dict[str, str]:
@@ -93,12 +98,12 @@ def _color_for(colors: dict[str, str], interest: str) -> str:
     return colors[interest]
 
 
-def _gauge(relevance: int) -> str:
-    """A small ring showing Claude's 1-10 relevance score."""
+def _gauge(relevance: int, label: str = "Relevance") -> str:
+    """A small ring showing Claude's 1-10 score (relevance, or weirdness)."""
     filled = max(0, min(10, relevance)) * 10  # the circle's circumference is 100
     return (
-        f'<div class="gauge" title="Relevance {relevance}/10"'
-        f' aria-label="Relevance {relevance} out of 10">'
+        f'<div class="gauge" title="{label} {relevance}/10"'
+        f' aria-label="{label} {relevance} out of 10">'
         '<svg viewBox="0 0 36 36" aria-hidden="true">'
         '<circle class="gauge-track" cx="18" cy="18" r="15.915"/>'
         f'<circle class="gauge-fill" cx="18" cy="18" r="15.915" stroke-dasharray="{filled} 100"/>'
@@ -106,7 +111,7 @@ def _gauge(relevance: int) -> str:
     )
 
 
-def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
+def _entry(entry: Entry, number: int | None, colors: dict[str, str], weird: bool = False) -> str:
     paper = entry.paper
     color = _color_for(colors, entry.interest)
     num = f'<span class="num">{number}.</span> ' if number is not None else ""
@@ -121,14 +126,14 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
     classes += " has-gauge" if entry.relevance is not None else ""
     parts = [f'<div class="{classes}" id="paper-{_e(paper.id)}" style="--tag: {color}">']
     if entry.relevance is not None:
-        parts.append(_gauge(entry.relevance))
+        parts.append(_gauge(entry.relevance, "Weirdness" if weird else "Relevance"))
     parts += [
         f"<h3>{num}{_link(paper.abs_url, paper.title)}</h3>",
         f'<p class="meta">{" · ".join(meta)}</p>',
         f'<p class="authors">{_authors(entry)}</p>',
     ]
     if entry.why:
-        parts.append(f'<p class="why"><strong>Why:</strong> {_e(entry.why)}</p>')
+        parts.append(f'<p class="why"><strong>{why_label(weird)}:</strong> {_e(entry.why)}</p>')
     if entry.deep_read:
         read = entry.deep_read
         parts += [
@@ -138,13 +143,17 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
             "<dl>",
             f"<dt>Method</dt><dd>{_e(read.method)}</dd>",
             f"<dt>Results</dt><dd>{_e(read.results)}</dd>",
-            f"<dt>Why it matters</dt><dd>{_e(read.why)}</dd>",
+            f"<dt>{deep_why_label(weird)}</dt><dd>{_e(read.why)}</dd>",
             "</dl>",
             "</div>",
         ]
     # The gauge shows the relevance score, so the text line leaves it out.
     evidence = evidence_parts(
-        entry.evidence, entry.interest, None, with_interest=number is not None
+        entry.evidence,
+        entry.interest,
+        None,
+        with_interest=number is not None and not weird,
+        weird=weird,
     )
     if evidence:
         if number is not None:
@@ -153,7 +162,7 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
             line = " · ".join([evidence[0], *rest]) if rest else evidence[0]
         else:
             line = " · ".join(_e(p) for p in evidence)
-        parts.append(f'<p class="matched">Matched: {line}</p>')
+        parts.append(f'<p class="matched">{"Found" if weird else "Matched"}: {line}</p>')
     parts += [
         "<details><summary>Abstract</summary>",
         f"<p>{_e(paper.abstract)}</p>",
@@ -166,8 +175,10 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str]) -> str:
 def digest_body(digest: Digest) -> str:
     """The digest as an <article>: header, top picks, interest groups, footer."""
     colors = interest_colors(digest.interests)
+    if digest.weird:
+        colors = {name: WEIRD_COLOR for name in digest.interests}
     out = [
-        '<article class="digest">',
+        f'<article class="digest{" weird" if digest.weird else ""}">',
         "<header>",
         f"<h1>{_e(digest.title)}</h1>",
         f'<p class="stats">{_e(stats_text(digest))}</p>',
@@ -177,12 +188,13 @@ def digest_body(digest: Digest) -> str:
         out.append(f'<p class="note"><strong>Note:</strong> {_e(note)}</p>')
     out.append("</header>")
     if not digest.entries:
-        out.append('<p class="empty">No new papers matched your interests this time.</p>')
+        out.append(f'<p class="empty">{_e(empty_text(digest))}</p>')
     else:
         if digest.top:
-            out += ['<section class="top-picks">', "<h2>⭐ Top picks</h2>"]
+            out += ['<section class="top-picks">', f"<h2>{_e(top_heading(digest))}</h2>"]
             out += [
-                _entry(entry, number, colors) for number, entry in enumerate(digest.top, start=1)
+                _entry(entry, number, colors, digest.weird)
+                for number, entry in enumerate(digest.top, start=1)
             ]
             out.append("</section>")
         for interest, entries in digest.groups():

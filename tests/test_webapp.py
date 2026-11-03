@@ -73,8 +73,9 @@ def _client(config_path, run=None, base_url="http://127.0.0.1:8765", account=Non
     return TestClient(app, base_url=base_url), app
 
 
-def _save_digest():
+def _save_digest(kind="digest"):
     digest = Digest(
+        kind=kind,
         generated=datetime(2026, 11, 3, 9, 30).astimezone(),
         categories=["astro-ph.CO"],
         interests=["Fast sims"],
@@ -265,6 +266,35 @@ def test_run_in_background_and_report_progress(config_path):
     status = client.get("/run/status").json()
     assert status["state"] == "done" and status["message"] == "No new papers since the last run."
     assert seen["options"].use_claude is True and seen["options"].include_seen is False
+
+
+def test_find_something_weird_runs_in_the_background(config_path):
+    seen = {}
+
+    def fake_run(conf, options, log):
+        seen["options"] = options
+        return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
+
+    client, app = _client(config_path, run=fake_run)
+    form = client.get("/").text
+    assert 'formaction="/weird"' in form and "Find something weird" in form
+    data = {"csrf": TOKEN, "use_claude": "on", "deep_read": "on"}
+    response = client.post("/weird", data=data, follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/run"
+    app.state.runner.thread.join(5)
+    status = client.get("/run/status").json()
+    assert seen["options"].mode == "weird" and seen["options"].deep_read is True
+    assert (
+        status["mode"] == "weird" and status["message"] == "No papers in the latest announcement."
+    )
+    assert client.post("/weird", data={"csrf": "wrong"}).status_code == 403
+
+
+def test_weird_digests_are_marked_in_the_list(config_path):
+    digest_id = _save_digest(kind="weird")
+    client, _ = _client(config_path)
+    page = client.get("/").text
+    assert "🌀 weird" in page and f'href="/digest/{digest_id}"' in page
 
 
 def test_run_errors_are_reported(config_path):

@@ -1,13 +1,17 @@
 """Local state in one SQLite file.
 
-seen        every paper ID ever processed (kept forever; tiny), so no paper
-            appears in two digests
+seen        every paper ID ever considered for a digest (kept forever; tiny):
+            `shown` marks papers that appeared in a digest, so none appears
+            twice; `fingerprint` records the interests and categories it was
+            last considered under, so changing them reconsiders papers that
+            were never shown
 papers      full metadata of recent papers (pruned after `retention_days`),
             for searching recent papers later
 embeddings  cached embedding vectors, keyed by paper and model
 runs        one row per run, for `status` and for working out what is new
 digests     every digest produced, as data, for the HTML views and web app
 deep_reads  Claude's full-text summaries, so a paper is never read twice
+expansions  search terms Claude suggested for each interest
 """
 
 from __future__ import annotations
@@ -23,13 +27,15 @@ import numpy as np
 from .digest import Digest
 from .models import DeepRead, Paper
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen (
     id TEXT PRIMARY KEY,
     published TEXT NOT NULL,
-    seen_at TEXT NOT NULL
+    seen_at TEXT NOT NULL,
+    shown INTEGER NOT NULL DEFAULT 0,
+    fingerprint TEXT
 );
 CREATE INDEX IF NOT EXISTS seen_published ON seen (published);
 CREATE TABLE IF NOT EXISTS papers (
@@ -51,7 +57,8 @@ CREATE TABLE IF NOT EXISTS digests (
     new INTEGER NOT NULL,
     markdown_path TEXT,
     html_path TEXT,
-    data TEXT NOT NULL
+    data TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'digest'
 );
 CREATE TABLE IF NOT EXISTS deep_reads (
     paper_id TEXT NOT NULL,
@@ -59,6 +66,11 @@ CREATE TABLE IF NOT EXISTS deep_reads (
     data TEXT NOT NULL,
     created TEXT NOT NULL,
     PRIMARY KEY (paper_id, key)
+);
+CREATE TABLE IF NOT EXISTS expansions (
+    key TEXT PRIMARY KEY,
+    terms TEXT NOT NULL,
+    created TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,20 +104,50 @@ class Store:
             )
         with self.db:
             self.db.executescript(_SCHEMA)
+            if 0 < version < 4:
+                self._upgrade_to_4()
             self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _columns(self, table: str) -> set[str]:
+        return {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}
+
+    def _upgrade_to_4(self) -> None:
+        """Add `shown`/`fingerprint` to seen and `kind` to digests.
+
+        Papers in earlier digests count as shown. Papers that were only
+        considered get no fingerprint, so the next run looks at them once more
+        under the current interests.
+        """
+        seen = self._columns("seen")
+        if "shown" not in seen:
+            self.db.execute("ALTER TABLE seen ADD COLUMN shown INTEGER NOT NULL DEFAULT 0")
+        if "fingerprint" not in seen:
+            self.db.execute("ALTER TABLE seen ADD COLUMN fingerprint TEXT")
+        if "kind" not in self._columns("digests"):
+            self.db.execute("ALTER TABLE digests ADD COLUMN kind TEXT NOT NULL DEFAULT 'digest'")
+        shown: set[str] = set()
+        for (data,) in self.db.execute("SELECT data FROM digests"):
+            for entry in json.loads(data).get("entries", []):
+                shown.add(entry["paper"]["id"])
+        self.db.executemany("UPDATE seen SET shown = 1 WHERE id = ?", [(i,) for i in shown])
 
     def close(self) -> None:
         self.db.close()
 
     # -- seen papers --------------------------------------------------------
 
-    def seen_ids(self, ids: Iterable[str]) -> set[str]:
+    def skip_ids(self, ids: Iterable[str], fingerprint: str) -> set[str]:
+        """Papers to leave out of a run: shown in a digest before, or already
+        considered under the same interests and categories (`fingerprint`)."""
         ids = list(ids)
         found: set[str] = set()
         for start in range(0, len(ids), 500):
             chunk = ids[start : start + 500]
             marks = ",".join("?" * len(chunk))
-            rows = self.db.execute(f"SELECT id FROM seen WHERE id IN ({marks})", chunk)
+            rows = self.db.execute(
+                f"SELECT id FROM seen WHERE id IN ({marks}) AND (shown = 1 OR fingerprint = ?)",
+                [*chunk, fingerprint],
+            )
             found.update(row[0] for row in rows)
         return found
 
@@ -114,13 +156,29 @@ class Store:
         row = self.db.execute("SELECT MAX(published) FROM seen").fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
-    def mark_seen(self, papers: Sequence[Paper], when: datetime | None = None) -> None:
+    def mark_seen(
+        self,
+        papers: Sequence[Paper],
+        fingerprint: str | None = None,
+        *,
+        shown: Iterable[str] = (),
+        when: datetime | None = None,
+    ) -> None:
+        """Record papers as considered under `fingerprint`, and `shown` ones as shown."""
         stamp = _iso(when or datetime.now(UTC))
         with self.db:
             self.db.executemany(
-                "INSERT OR IGNORE INTO seen (id, published, seen_at) VALUES (?, ?, ?)",
-                [(p.id, _iso(p.published), stamp) for p in papers],
+                "INSERT INTO seen (id, published, seen_at, fingerprint) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (id) DO UPDATE SET"
+                " seen_at = excluded.seen_at, fingerprint = excluded.fingerprint",
+                [(p.id, _iso(p.published), stamp, fingerprint) for p in papers],
             )
+            self.db.executemany("UPDATE seen SET shown = 1 WHERE id = ?", [(i,) for i in shown])
+        self.put_papers(papers)
+
+    def put_papers(self, papers: Sequence[Paper]) -> None:
+        """Keep papers' metadata (for search and get_paper) without marking them seen."""
+        with self.db:
             self.db.executemany(
                 "INSERT OR REPLACE INTO papers (id, published, data) VALUES (?, ?, ?)",
                 [(p.id, _iso(p.published), json.dumps(p.to_dict())) for p in papers],
@@ -206,8 +264,8 @@ class Store:
     ) -> int:
         with self.db:
             cursor = self.db.execute(
-                "INSERT INTO digests (generated, picked, new, markdown_path, html_path, data)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO digests (generated, picked, new, markdown_path, html_path, data, kind)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     digest.generated.isoformat(),
                     len(digest.entries),
@@ -215,14 +273,15 @@ class Store:
                     str(markdown_path) if markdown_path else None,
                     str(html_path) if html_path else None,
                     json.dumps(digest.to_dict()),
+                    digest.kind,
                 ),
             )
         return int(cursor.lastrowid)
 
     def list_digests(self, limit: int = 200) -> list[sqlite3.Row]:
-        """Newest first: id, generated, picked, new, markdown_path, html_path."""
+        """Newest first: id, generated, picked, new, markdown_path, html_path, kind."""
         return self.db.execute(
-            "SELECT id, generated, picked, new, markdown_path, html_path FROM digests"
+            "SELECT id, generated, picked, new, markdown_path, html_path, kind FROM digests"
             " ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -247,6 +306,19 @@ class Store:
                 "INSERT OR REPLACE INTO deep_reads (paper_id, key, data, created)"
                 " VALUES (?, ?, ?, ?)",
                 (paper_id, key, json.dumps(read.to_dict()), _iso(datetime.now(UTC))),
+            )
+
+    # -- search terms from Claude --------------------------------------------
+
+    def get_expansion(self, key: str) -> list[str] | None:
+        row = self.db.execute("SELECT terms FROM expansions WHERE key = ?", (key,)).fetchone()
+        return list(json.loads(row[0])) if row else None
+
+    def put_expansion(self, key: str, terms: Sequence[str]) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO expansions (key, terms, created) VALUES (?, ?, ?)",
+                (key, json.dumps(list(terms)), _iso(datetime.now(UTC))),
             )
 
     # -- housekeeping -------------------------------------------------------

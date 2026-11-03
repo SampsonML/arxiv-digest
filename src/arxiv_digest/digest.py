@@ -54,11 +54,17 @@ class Digest:
     notes: list[str] = field(default_factory=list)
     entries: list[Entry] = field(default_factory=list)
     version: str = __version__
+    kind: str = "digest"  # "digest" (your interests) or "weird" (Find something weird)
+
+    @property
+    def weird(self) -> bool:
+        return self.kind == "weird"
 
     @property
     def title(self) -> str:
         g = self.generated
-        return f"arXiv digest — {g:%a} {g.day} {g:%b %Y}"
+        name = "Something weird" if self.weird else "arXiv digest"
+        return f"{name} — {g:%a} {g.day} {g:%b %Y}"
 
     @property
     def top(self) -> list[Entry]:
@@ -81,6 +87,7 @@ class Digest:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
+            "kind": self.kind,
             "generated": self.generated.isoformat(),
             "categories": self.categories,
             "interests": self.interests,
@@ -152,6 +159,7 @@ class Digest:
             notes=list(data.get("notes", [])),
             entries=entries,
             version=data.get("version", ""),
+            kind=data.get("kind", "digest"),
         )
 
 

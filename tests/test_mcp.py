@@ -118,7 +118,7 @@ def test_digests(config_path):
 
 def _seed(config_path):
     store = Store(paths.database_path())
-    store.mark_seen(PAPERS)
+    store.mark_seen(PAPERS, "x")
     store.close()
 
 

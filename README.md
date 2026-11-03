@@ -53,6 +53,8 @@ You describe what you care about: keywords, a sentence or two about a research i
 2. ranks them against your interests on your own computer
 3. shows the best ones in the app, with links, abstracts and Claude's reasons
 
+Feeling curious? **🌀 Find something weird**, next to the Run button, ignores your interests and finds the 5 most unusual papers in the latest announcement of your categories. Claude reads each one in full and explains what makes it weird (see [Find something weird](#find-something-weird)).
+
 Digests stay in the app, where you can browse every one you've made. Nothing is written to your disk unless you ask: to keep a digest as a file, press **Save digest** at the top of it and choose **As HTML** (a web page with working links and rendered math) or **As Markdown** (for any editor, GitHub or Obsidian). Your browser downloads it.
 
 > **Status: v0.5.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Any digest can be saved as Markdown or HTML. There's a local web app, and an MCP server so Claude Code and Claude Desktop can use your digests directly.
@@ -68,7 +70,7 @@ arxiv-digest status    # file locations, Claude's sign-in and the last run
 
 If your terminal says `arxiv-digest` isn't found, run `uv tool update-shell` and open a new terminal; that adds `~/.local/bin` to your PATH.
 
-The first run downloads a small language model once (~90 MB) and covers arXiv's latest announcement. After that, each run picks up everything announced since the previous run (up to 7 days back), and a paper never appears in two digests.
+The first run downloads a small language model once (~90 MB) and covers arXiv's latest announcement. After that, each run picks up everything announced since the previous run (up to 7 days back), and a paper never appears in two digests. If you change your interests or categories, the next run also looks again at recent papers it considered before but didn't show you, so new interests aren't starved by an earlier run.
 
 arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with none on Friday or Saturday nights. Running a digest each morning is enough; running it more often just finds nothing new.
 
@@ -82,8 +84,9 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest run --print` | Also print the digest (Markdown) in the terminal |
 | `arxiv-digest run --no-open` | Don't open the app |
 | `arxiv-digest run --dry-run` | Print the digest instead of keeping it, and remember nothing |
+| `arxiv-digest weird` | Find something weird: the 5 most unusual papers in the latest announcement, read in full by Claude |
 | `arxiv-digest run --days 3` | Cover the last 3 days of submissions (papers already shown are skipped) |
-| `arxiv-digest run --include-seen` | Redo the latest announcement, including papers already shown (useful after editing interests) |
+| `arxiv-digest run --include-seen` | Redo the latest announcement, including papers already shown in a digest |
 | `arxiv-digest run --no-claude` | Choose papers on this computer only, without Claude's picks and explanations |
 | `arxiv-digest run --no-deep-read` | Skip Claude's full-text read of the top picks |
 | `arxiv-digest run --no-model` | Rank by keywords and followed authors only (no local model) |
@@ -150,10 +153,13 @@ Less common settings, with their defaults:
 
 ## How ranking works
 
-1. **Fetch.** arXiv's API lists papers only after they're announced, so arxiv-digest asks for everything *submitted* since the newest paper it has already seen, with a 2-day overlap for papers announced late. It drops papers already shown, and keeps to arXiv's limit of one request every 3 seconds. Cross-listed papers are included. New versions of old papers are not.
-2. **Score.** A small model on your CPU turns each title and abstract, and each interest, into a vector, and measures how close they are. The closeness is then compared with the rest of that day's papers (in standard deviations), so interests worded broadly or narrowly are treated fairly. Keyword hits add to the score, and followed authors put a paper at the top.
-3. **Shortlist.** The shortlist keeps every followed-author paper plus the best papers for each interest, so a busy topic can't crowd out a quiet one.
-4. **Pick.** Claude reads the shortlist and your interests and keeps only the papers that are genuinely relevant: at most `max_papers`, best first, and none on a quiet day. For each one it writes a short "why" and a 1–10 relevance score. Followed-author papers are always kept.
+1. **Fetch.** arXiv's API lists papers only after they're announced, so arxiv-digest asks for everything *submitted* since the newest paper it has already seen, with a 2-day overlap for papers announced late. It keeps to arXiv's limit of one request every 3 seconds. Cross-listed papers are included. New versions of old papers are not. It then drops:
+   - papers that were in an earlier digest (always), and
+   - papers it already considered with the same interests and categories. After you change either, papers that were considered but never shown are looked at again.
+2. **Search terms.** The local model is small and doesn't know much jargon: to it, "flow matching" reads like "flow" plus "matching", so graph-matching and optical-flow papers would outrank papers on flow matching. So, once per interest (and again only when you change it), Claude lists the phrases papers on that topic actually use, for example "rectified flow", "stochastic interpolants" and "conditional flow matching". They count like your own keywords, and the run's log shows them. Without Claude, terms suggested earlier are still used.
+3. **Score.** A small model on your CPU turns each title and abstract, and each interest, into a vector, and measures how close they are. The closeness is then compared with the rest of that day's papers (in standard deviations), so interests worded broadly or narrowly are treated fairly. Keyword hits (yours and Claude's search terms) add to the score, and followed authors put a paper at the top.
+4. **Shortlist.** The shortlist keeps every followed-author paper plus the best papers for each interest, so a busy topic can't crowd out a quiet one. Within each interest, papers containing one of its keywords or search terms come first, taking up to two thirds of its places, because an exact phrase is a stronger signal than the small model's sense of meaning.
+5. **Pick.** Claude reads the shortlist and your interests and keeps only the papers that are genuinely relevant: at most `max_papers`, best first, and none on a quiet day. For each one it writes a short "why" and a 1–10 relevance score. Followed-author papers are always kept.
    - It runs through the Claude Code CLI (`claude -p`) with your own Claude sign-in, so no API key is needed. Each call is isolated: no tools, no saved session, and your Claude Code settings and hooks aren't loaded. The answer must match a JSON schema, and arxiv-digest checks it before use.
    - In testing, one call on a 35-paper shortlist took a few seconds.
    - **Claude account only.** arxiv-digest uses your Claude account (a Claude subscription signed in to Claude Code) and never API keys or pay-as-you-go API credits:
@@ -164,7 +170,7 @@ Less common settings, with their defaults:
      - When you're not signed in, runs skip Claude with a note saying how to log in.
    - If Claude Code isn't installed, or the call fails, the digest falls back to the local rule (a followed author, a keyword hit, or similarity well above the day's average) and says so at the top.
 
-5. **Deep read.** For the top picks (3 by default), arxiv-digest downloads the full text. It uses arXiv's HTML version where there is one, which keeps the math as LaTeX, and otherwise the PDF's text, leaving out the references. Claude reads each paper and writes three parts, at least five sentences in all, shown in a "Deep read" panel on the paper's card:
+6. **Deep read.** For the top picks (3 by default), arxiv-digest downloads the full text. It uses arXiv's HTML version where there is one, which keeps the math as LaTeX, and otherwise the PDF's text, leaving out the references. Claude reads each paper and writes three parts, at least five sentences in all, shown in a "Deep read" panel on the paper's card:
    - **Method:** what the authors did (2–3 sentences)
    - **Results:** what they found, with the key numbers (2–3 sentences)
    - **Why it matters:** why it matters for your interest, with the main caveat (1–2 sentences)
@@ -174,9 +180,20 @@ Less common settings, with their defaults:
 **What leaves your computer:**
 - requests to arXiv, including full-text downloads for deep reads
 - the one-time model download from Hugging Face
-- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read
+- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read (for **Find something weird**: the 30 most unusual papers' titles, authors and abstracts, and the full text of the 5 picked)
 
 With `--no-claude`, ranking stays entirely on your computer.
+
+## Find something weird
+
+**🌀 Find something weird** (in the app, next to **Run today's digest**, or `arxiv-digest weird`) is for the days you want a surprise. Your interests play no part:
+
+1. It fetches arXiv's latest announcement in your categories.
+2. On your computer, it scores how unlike the rest each paper is: the average similarity to its 10 nearest neighbours in the local model's space, plus a little for a rare mix of fields among its categories (say cs with q-bio). Errata and withdrawn papers are left out.
+3. Claude reads the 30 most unusual and picks the 5 weirdest *in an interesting way*: an odd question, an unexpected crossover, a method used where nobody would expect it, a surprising claim. Merely obscure papers don't count. Each gets a weirdness score from 1 to 10 and a reason.
+4. Claude reads all 5 in full and writes a Method, Results and **Why it's weird** summary, fairly and with some wit.
+
+The result is a digest of its own, marked 🌀 weird in the list, which you can save like any other. Nothing is marked as seen, so your normal digests are unaffected. A run over all of computer science (about 1,700 papers) took under a minute in testing. Without Claude, you get the 5 most isolated papers without explanations.
 
 ## Where files live
 
@@ -239,7 +256,7 @@ The entry runs the Python environment it was added from (the installer's is `~/.
 
 - **Start page:** a greeting with your latest digest's numbers (new, shortlisted, picked) and a **Run today's digest** button. Below it, your interests appear as coloured chips: click one to edit it in a side panel, or click **+ Add interest**. **Save** keeps the changes; **Save and re-run latest announcement** also shows today's papers again, chosen for the updated interests.
 - **Digests:** every digest you've made, newest first, with older/newer links. **Save digest** at the top of one downloads it as HTML or Markdown.
-- **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away.
+- **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Deep read, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away. **🌀 Find something weird** uses the same tracker.
 - **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, and set the digest size and Claude model. Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
 
 **Background:** the app shows a night-sky image behind dark, translucent panels: a dark indigo sky with a soft copper and teal light trail. Set `app_background = "none"` in the config to turn it off, or point it at your own `.jpg`, `.png` or `.webp` file. The image is original artwork drawn entirely by code (`tools/make_background.py`, no photos involved). Regenerate it, or try another seed, with `uv run --with pillow python tools/make_background.py src/arxiv_digest/assets/background.jpg 12`.

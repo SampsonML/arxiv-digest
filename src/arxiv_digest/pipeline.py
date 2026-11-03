@@ -3,7 +3,10 @@
 Which papers count as new:
   - normal run: everything submitted since the newest paper seen before (minus a
     2-day margin for papers announced late, e.g. after moderation), at most
-    `max_catchup_days` back; papers already seen are dropped;
+    `max_catchup_days` back. Dropped: papers shown in an earlier digest, and
+    papers already considered under the same interests and categories. After
+    you change interests or categories, papers that were looked at but never
+    shown get another chance;
   - first run (or --include-seen): arXiv's latest announcement;
   - `--days N`: the N days of submissions up to the newest available paper, so
     asking on a Monday morning still finds papers rather than an empty weekend.
@@ -20,10 +23,11 @@ import numpy as np
 
 from .arxiv_api import ArxivClient, announcement_start
 from .claude_cli import SIGN_IN_HINT, ClaudeAnswer
-from .config import Config
+from .config import Config, selection_fingerprint
 from .deepread import DeepReader
 from .digest import Digest, build_digest
 from .embed import Embedder, EmbeddingUnavailable
+from .expand import Expander, with_cached_terms
 from .html_render import standalone_page
 from .models import Paper
 from .rank import ClaudeError, ClaudeNotSignedIn, Pick, Ranker, local_picks
@@ -53,6 +57,7 @@ class RunOptions:
     use_embeddings: bool = True
     use_claude: bool = True
     deep_read: bool = True
+    mode: str = "digest"  # "digest", or "weird" for Find something weird (weird.py)
 
 
 @dataclass
@@ -123,11 +128,13 @@ def run_digest(
     *,
     ranker: Ranker | None = None,
     deep_reader: DeepReader | None = None,
+    expander: Expander | None = None,
     log: Log = print,
     now: datetime | None = None,
     progress: Progress = _no_progress,
 ) -> RunResult:
     options = options or RunOptions()
+    fingerprint = selection_fingerprint(config)
     now = (now or datetime.now(UTC)).astimezone(UTC)
     newest_seen = store.newest_seen_published()
     notes: list[str] = []
@@ -161,8 +168,8 @@ def run_digest(
     papers = client.search(config.categories, start, now, progress=fetched)
     result.fetched = len(papers)
 
-    seen = set() if options.include_seen else store.seen_ids(p.id for p in papers)
-    new = [p for p in papers if p.id not in seen]
+    skip = set() if options.include_seen else store.skip_ids((p.id for p in papers), fingerprint)
+    new = [p for p in papers if p.id not in skip]
     result.new_papers = new
     if new:
         result.window_start = min(p.published for p in new)
@@ -176,6 +183,26 @@ def run_digest(
         return result
 
     progress("shortlist", {"new": len(new), "fetched": result.fetched})
+    not_signed_in = (
+        "Claude Code isn't signed in to a Claude account (API keys aren't used), so"
+        " papers were chosen on this computer only."
+        f" {SIGN_IN_HINT}"
+    )
+    claude_ready = False
+    if ranker is not None and options.use_claude:
+        if not ranker.available():
+            notes.append(
+                "Claude Code (`claude`) wasn't found, so papers were chosen on this computer"
+                " only. Install Claude Code to get Claude's picks and explanations."
+            )
+        elif ranker.signed_in() is False:
+            notes.append(not_signed_in)
+        else:
+            claude_ready = True
+    if expander is not None:
+        # Claude's search terms for each interest (cached; asked once per change).
+        config, expand_notes = expander.expand(config, store, ask=claude_ready, log=log)
+        notes.extend(expand_notes)
     vectors = queries = None
     if embedder is not None and options.use_embeddings:
         try:
@@ -195,40 +222,27 @@ def run_digest(
     result.picks = local_picks(
         select_locally(result.shortlisted, config.max_papers, config.min_zscore)
     )
-    if ranker is not None and options.use_claude and result.shortlisted:
-        not_signed_in = (
-            "Claude Code isn't signed in to a Claude account (API keys aren't used), so"
-            " papers were chosen on this computer only."
-            f" {SIGN_IN_HINT}"
-        )
-        if not ranker.available():
-            notes.append(
-                "Claude Code (`claude`) wasn't found, so papers were chosen on this computer"
-                " only. Install Claude Code to get Claude's picks and explanations."
-            )
-        elif ranker.signed_in() is False:
+    if ranker is not None and claude_ready and result.shortlisted:
+        log(f"Asking {ranker.label} to choose from {len(result.shortlisted)} papers…")
+        progress("claude", {"shortlisted": len(result.shortlisted)})
+        try:
+            ranked = ranker.rank(config, result.shortlisted)
+        except ClaudeNotSignedIn:
             notes.append(not_signed_in)
+        except ClaudeError as exc:
+            notes.append(f"Claude couldn't rank the papers ({exc}); showing the local ranking.")
         else:
-            log(f"Asking {ranker.label} to choose from {len(result.shortlisted)} papers…")
-            progress("claude", {"shortlisted": len(result.shortlisted)})
-            try:
-                ranked = ranker.rank(config, result.shortlisted)
-            except ClaudeNotSignedIn:
-                notes.append(not_signed_in)
-            except ClaudeError as exc:
-                notes.append(f"Claude couldn't rank the papers ({exc}); showing the local ranking.")
-            else:
-                result.picks = ranked.picks
-                result.claude = ranked.answer
-                answer = ranked.answer
-                model = answer.model if answer and answer.model else ranker.label
-                if answer and answer.duration_s is not None:
-                    log(f"  Claude answered in {answer.duration_s:.0f} s")
-                ranked_by = (
-                    f"Chosen and explained by Claude ({model}) from {len(result.shortlisted)}"
-                    " papers shortlisted on this computer by similarity, keywords and"
-                    " followed authors."
-                )
+            result.picks = ranked.picks
+            result.claude = ranked.answer
+            answer = ranked.answer
+            model = answer.model if answer and answer.model else ranker.label
+            if answer and answer.duration_s is not None:
+                log(f"  Claude answered in {answer.duration_s:.0f} s")
+            ranked_by = (
+                f"Chosen and explained by Claude ({model}) from {len(result.shortlisted)}"
+                " papers shortlisted on this computer by similarity, keywords and"
+                " followed authors."
+            )
 
     deep_count = min(config.deep_reads, config.top_picks)
     if deep_reader is not None and options.deep_read and result.claude is not None and deep_count:
@@ -260,7 +274,7 @@ def run_digest(
         # Digests are kept in the database; files are written only on request
         # (the app's Save button, or `arxiv-digest run --save`).
         result.digest_id = store.save_digest(result.digest, None, None)
-        store.mark_seen(new)
+        store.mark_seen(new, fingerprint, shown=[p.candidate.paper.id for p in result.picks])
         assert run_id is not None
         store.finish_run(
             run_id,
@@ -300,6 +314,7 @@ def latest_shortlist(
     now = datetime.now(UTC)
     anchor = newest.published if newest else now
     papers = client.search(config.categories, announcement_start(anchor), now)
+    config = with_cached_terms(config, store, config.claude_model)
     vectors = queries = None
     if embedder is not None and papers:
         try:
@@ -332,8 +347,10 @@ def run_with_config(
         else None
     )
     ranker = deep_reader = fetcher = None
+    cli = ClaudeCLI(config.claude_command, config.claude_model, timeout=config.claude_timeout)
+    # Always set up: without Claude it still applies search terms cached earlier.
+    expander = Expander(cli)
     if options.use_claude and config.use_claude:
-        cli = ClaudeCLI(config.claude_command, config.claude_model, timeout=config.claude_timeout)
         ranker = ClaudeRanker(cli)
         if options.deep_read and config.deep_reads:
             from .fulltext import FullTextFetcher
@@ -352,6 +369,7 @@ def run_with_config(
             options,
             ranker=ranker,
             deep_reader=deep_reader,
+            expander=expander,
             log=log,
             progress=progress,
         )

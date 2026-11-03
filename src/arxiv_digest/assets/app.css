@@ -327,3 +327,17 @@ a.button.small, button.small { padding: .28rem .7rem; font-size: .82rem; font-we
 .shortcut-offer .offer-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .shortcut-offer .offer-row p { flex: 1; min-width: 16rem; margin: 0; }
 .offer-icon { width: 44px; height: 44px; border-radius: 11px; box-shadow: 0 0 18px rgba(79, 193, 201, .25); }
+
+/* "Find something weird": a violet button beside Run, and a badge in the digest list */
+.run-buttons { display: flex; flex-wrap: wrap; gap: .7rem; align-items: center; }
+button.weird {
+  color: #f4efff; border-color: color-mix(in srgb, #a58bf2 70%, transparent);
+  background: linear-gradient(120deg, color-mix(in srgb, #a58bf2 55%, transparent), color-mix(in srgb, #4fc1c9 35%, transparent));
+  box-shadow: 0 6px 22px color-mix(in srgb, #a58bf2 28%, transparent);
+}
+button.weird:hover { border-color: #c4b2ff; filter: brightness(1.08); }
+.weird-badge {
+  margin-left: .45rem; padding: .05rem .5rem; border-radius: 999px; font-size: .74rem; font-weight: 600;
+  color: #d9ccff; background: color-mix(in srgb, #a58bf2 22%, transparent);
+  border: 1px solid color-mix(in srgb, #a58bf2 45%, transparent);
+}

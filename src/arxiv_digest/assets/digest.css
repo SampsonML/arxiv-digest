@@ -118,3 +118,8 @@ body {
 .deep-read dt { font-weight: 600; font-size: .86rem; color: var(--accent); padding-top: .05rem; }
 .deep-read dd { margin: 0; font-size: .94rem; }
 @media (max-width: 640px) { .deep-read dl { grid-template-columns: 1fr; } .deep-read dd { margin-bottom: .3rem; } }
+
+/* "Find something weird" digests: violet accents */
+.digest.weird .paper.top::after { background: linear-gradient(180deg, #a58bf2, var(--teal)); }
+.digest.weird .gauge .gauge-fill { stroke: #a58bf2; filter: drop-shadow(0 0 3px rgba(165, 139, 242, .6)); }
+.digest.weird .deep-read .badge { background: linear-gradient(120deg, #a58bf2, var(--teal)); }

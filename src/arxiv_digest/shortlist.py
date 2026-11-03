@@ -10,11 +10,16 @@ For each (paper, interest) pair:
     model- and wording-dependent band (e.g. 0.60-0.80), so scores are compared
     on this relative scale instead; that also keeps a broadly worded interest
     from outranking a narrowly worded one;
-  - keyword bonus: +1 per keyword found, at most +2 (in z-score units);
+  - keyword bonus: +1 per keyword found, at most +2 (in z-score units).
+    Keywords are the user's plus the search terms Claude suggested for the
+    interest (expand.py);
   - followed author: +100, which puts the paper above every topic match.
 
 The shortlist keeps every followed-author paper plus the best papers for each
-topic interest, so a busy topic cannot crowd out a quiet one.
+topic interest, so a busy topic cannot crowd out a quiet one. Within an
+interest, papers containing one of its keywords come first (up to two thirds of
+its places): the small local model often misses jargon ("flow matching" reads
+to it like "flow" + "matching"), while an exact phrase is a strong signal.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ KEYWORD_BONUS = 1.0
 MAX_KEYWORD_BONUS = 2.0
 AUTHOR_BONUS = 100.0
 MIN_PER_INTEREST = 5
+KEYWORD_SHARE = 2 / 3  # at most this share of an interest's places is reserved for keyword hits
 
 
 @dataclass(frozen=True)
@@ -115,7 +121,7 @@ def score_papers(
                 continue
             if interest.require and len(find_terms(text, interest.require)) < len(interest.require):
                 continue
-            keywords = tuple(find_terms(text, interest.keywords))
+            keywords = tuple(find_terms(text, interest.all_keywords))
             authors = tuple(match_authors(paper.authors, interest.authors))
             interest_stats = stats.get(interest.name, {})
             similarity = zscore = rank = of = None
@@ -142,25 +148,32 @@ def shortlist(
     """The papers worth a closer look: followed authors plus the top of each topic."""
     topics = [i for i in interests if i.has_topic]
     per_topic = max(MIN_PER_INTEREST, math.ceil(size / max(1, len(topics))))
+    reserved_per_topic = max(1, int(per_topic * KEYWORD_SHARE))
     chosen: dict[str, Candidate] = {}
+    reserved: set[str] = set()  # keyword hits, kept before meaning-only matches
     for candidate in candidates:
         if candidate.followed_authors:
             chosen[candidate.paper.id] = candidate
     for interest in topics:
         scored = [
-            (match.score, candidate)
+            (match, candidate)
             for candidate in candidates
             if (match := candidate.match_for(interest.name)) is not None
         ]
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        for _, candidate in scored[:per_topic]:
+        scored.sort(key=lambda pair: pair[0].score, reverse=True)
+        hits = [c for m, c in scored if m.keywords][:reserved_per_topic]
+        hit_ids = {c.paper.id for c in hits}
+        rest = [c for _, c in scored if c.paper.id not in hit_ids]
+        for candidate in hits + rest[: max(0, per_topic - len(hits))]:
             chosen.setdefault(candidate.paper.id, candidate)
+        reserved |= hit_ids
     ranked = sorted(chosen.values(), key=lambda c: c.score, reverse=True)
     if len(ranked) <= size:
         return ranked
     by_author = [c for c in ranked if c.followed_authors]
-    others = [c for c in ranked if not c.followed_authors]
-    kept = by_author + others[: max(0, size - len(by_author))]
+    hits = [c for c in ranked if not c.followed_authors and c.paper.id in reserved]
+    others = [c for c in ranked if not c.followed_authors and c.paper.id not in reserved]
+    kept = (by_author + hits + others)[: max(size, len(by_author))]
     return sorted(kept, key=lambda c: c.score, reverse=True)
 
 

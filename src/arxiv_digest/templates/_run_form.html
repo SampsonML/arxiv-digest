@@ -1,8 +1,14 @@
 <form method="post" action="/run" class="run-form hero-actions">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <button type="submit" class="primary big"{% if job.state == 'running' %} disabled{% endif %}>
-    {% if job.state == 'running' %}Running…{% else %}Run today's digest{% endif %}
-  </button>
+  <div class="run-buttons">
+    <button type="submit" class="primary big"{% if job.state == 'running' %} disabled{% endif %}>
+      {% if job.state == 'running' %}Running…{% else %}Run today's digest{% endif %}
+    </button>
+    <button type="submit" formaction="/weird" class="weird big"{% if job.state == 'running' %} disabled{% endif %}
+      title="The 5 most unusual papers in the latest announcement in your categories, whatever your interests, each read in full by Claude">
+      <span aria-hidden="true">🌀</span> Find something weird
+    </button>
+  </div>
   <div class="options">
     <label><input type="checkbox" name="use_claude" checked> Let Claude choose and explain</label>
     <label><input type="checkbox" name="deep_read" checked> Deep-read the top picks (full text)</label>

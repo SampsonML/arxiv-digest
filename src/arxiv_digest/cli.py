@@ -248,6 +248,60 @@ def run(
             err.print(f"  Opened {url} (save it as HTML or Markdown from there)")
 
 
+@app.command()
+def weird(
+    config: ConfigOption = None,
+    no_claude: Annotated[
+        bool,
+        typer.Option("--no-claude", help="Just the most isolated papers, without Claude."),
+    ] = False,
+    no_deep_read: Annotated[
+        bool, typer.Option("--no-deep-read", help="Skip Claude's full-text reads.")
+    ] = False,
+    no_open: Annotated[
+        bool, typer.Option("--no-open", help="Don't open the digest in the web app.")
+    ] = False,
+    show: Annotated[
+        bool, typer.Option("--print", help="Also print the digest to the terminal.")
+    ] = False,
+) -> None:
+    """Find something weird: the 5 most unusual papers in the latest announcement.
+
+    Your interests play no part. The local model finds the papers least like the
+    rest; Claude picks the weirdest, reads them in full and says why they're weird.
+    """
+    from .weird import run_weird_with_config
+
+    conf = _load(config)
+    options = RunOptions(mode="weird", use_claude=not no_claude, deep_read=not no_deep_read)
+    try:
+        result = run_weird_with_config(
+            conf, options, log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]")
+        )
+    except ArxivError as exc:
+        _fail(str(exc))
+    for note in result.notes:
+        err.print(f"[yellow]Note:[/yellow] {escape(note)}")
+    if result.markdown is None:
+        return
+    if show:
+        out.print(result.markdown, markup=False, highlight=False)
+    err.print(
+        f"[green]{len(result.new_papers)} papers · {len(result.shortlisted)} most unusual ·"
+        f" {len(result.picks)} picked[/green] · digest #{result.digest_id}"
+    )
+    if not no_open:
+        from . import launcher
+
+        explicit = config.expanduser().resolve() if config else None
+        try:
+            url, _ = launcher.open_app(config=explicit, page=f"digest/{result.digest_id}")
+        except launcher.LauncherError as exc:
+            err.print(f"[yellow]Couldn't open the app:[/yellow] {escape(str(exc))}")
+        else:
+            err.print(f"  Opened {url}")
+
+
 # ---------------------------------------------------------------------------
 # categories
 
