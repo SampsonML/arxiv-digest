@@ -21,7 +21,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import numpy as np
@@ -272,9 +272,14 @@ def run_weird(
 
     newest = client.newest(config.categories)
     anchor = newest.published if newest else now
-    start = announcement_start(anchor)
+    if options.days is not None:
+        start = anchor - timedelta(days=options.days)
+        what = f"the last {options.days:g} days of papers"
+    else:
+        start = announcement_start(anchor)
+        what = "arXiv's latest announcement"
     result = RunResult(window_start=start, window_end=now, notes=notes)
-    log(f"Fetching arXiv's latest announcement in {', '.join(config.categories)}…")
+    log(f"Fetching {what} in {', '.join(config.categories)}…")
     progress("fetch", {"done": 0, "total": None})
 
     def fetched(done: int, total: int) -> None:
@@ -415,7 +420,7 @@ def run_weird_with_config(
             reader_cli = ClaudeCLI(
                 config.claude_command, config.deep_read_model, timeout=config.claude_timeout
             )
-            deep_reader = DeepReader(reader_cli, fetcher.fetch, workers=PICKS, weird=True)
+            deep_reader = DeepReader(reader_cli, fetcher.fetch, workers=PICKS, style="weird")
     try:
         return run_weird(
             config,

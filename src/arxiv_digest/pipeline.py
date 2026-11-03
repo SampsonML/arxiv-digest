@@ -8,8 +8,10 @@ Which papers count as new:
     you change interests or categories, papers that were looked at but never
     shown get another chance;
   - first run (or --include-seen): arXiv's latest announcement;
-  - `--days N`: the N days of submissions up to the newest available paper, so
-    asking on a Monday morning still finds papers rather than an empty weekend.
+  - `--days N` (or "Papers from" in the app): the N days of submissions up to the
+    newest available paper, so asking on a Monday morning still finds papers
+    rather than an empty weekend. Only papers already shown in a digest are
+    skipped, since asking for a window means looking at it again.
 """
 
 from __future__ import annotations
@@ -168,7 +170,14 @@ def run_digest(
     papers = client.search(config.categories, start, now, progress=fetched)
     result.fetched = len(papers)
 
-    skip = set() if options.include_seen else store.skip_ids((p.id for p in papers), fingerprint)
+    if options.include_seen:
+        skip: set[str] = set()
+    elif options.days is not None:
+        # An explicit window ("the last 3 days") means look again: skip only
+        # papers that were already shown in a digest.
+        skip = store.shown_ids(p.id for p in papers)
+    else:
+        skip = store.skip_ids((p.id for p in papers), fingerprint)
     new = [p for p in papers if p.id not in skip]
     result.new_papers = new
     if new:

@@ -123,3 +123,11 @@ body {
 .digest.weird .paper.top::after { background: linear-gradient(180deg, #a58bf2, var(--teal)); }
 .digest.weird .gauge .gauge-fill { stroke: #a58bf2; filter: drop-shadow(0 0 3px rgba(165, 139, 242, .6)); }
 .digest.weird .deep-read .badge { background: linear-gradient(120deg, #a58bf2, var(--teal)); }
+
+/* "Find crossovers" digests: where Claude looked */
+.digest .bridges { margin: .6rem 0; font-size: .88rem; color: var(--muted); }
+.digest .bridges summary { cursor: pointer; }
+.digest .bridges ul { margin: .4rem 0 0; padding-left: 1.2rem; }
+.digest .bridges li { margin: .2rem 0; }
+.digest .bridges .bridge-interest { font-weight: 600; color: var(--fg); }
+.digest.crossover .paper.top::after { background: linear-gradient(180deg, var(--teal), #6fa8f5); }

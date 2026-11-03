@@ -53,7 +53,11 @@ You describe what you care about: keywords, a sentence or two about a research i
 2. ranks them against your interests on your own computer
 3. shows the best ones in the app, with links, abstracts and Claude's reasons
 
-Feeling curious? **🌀 Find something weird**, next to the Run button, ignores your interests and finds the 5 most unusual papers in the latest announcement of your categories. Claude reads each one in full and explains what makes it weird (see [Find something weird](#find-something-weird)).
+Two more buttons sit next to **Run today's digest**:
+- **🔭 Find crossovers** looks *outside* your field for papers whose methods, data or ideas could carry over to your interests, and says what you could borrow (see [Find crossovers](#find-crossovers)).
+- **🌀 Find something weird** ignores your interests and finds the 5 most unusual papers in the latest announcement of your categories, and explains what makes each one weird (see [Find something weird](#find-something-weird)).
+
+**Papers from** under the buttons picks the window: since the last run (the default), or the last day, 2 or 3 days, week or 2 weeks. A fixed window looks at all of it again, skipping only papers already shown in a digest.
 
 Digests stay in the app, where you can browse every one you've made. Nothing is written to your disk unless you ask: to keep a digest as a file, press **Save digest** at the top of it and choose **As HTML** (a web page with working links and rendered math) or **As Markdown** (for any editor, GitHub or Obsidian). Your browser downloads it.
 
@@ -84,8 +88,9 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest run --print` | Also print the digest (Markdown) in the terminal |
 | `arxiv-digest run --no-open` | Don't open the app |
 | `arxiv-digest run --dry-run` | Print the digest instead of keeping it, and remember nothing |
-| `arxiv-digest weird` | Find something weird: the 5 most unusual papers in the latest announcement, read in full by Claude |
-| `arxiv-digest run --days 3` | Cover the last 3 days of submissions (papers already shown are skipped) |
+| `arxiv-digest crossovers` | Find crossovers: papers from other fields that could carry over to your interests (`--days N` for a longer window) |
+| `arxiv-digest weird` | Find something weird: the 5 most unusual papers in the latest announcement, read in full by Claude (`--days N` for a longer window) |
+| `arxiv-digest run --days 3` | Look at the last 3 days of submissions again (only papers already shown in a digest are skipped) |
 | `arxiv-digest run --include-seen` | Redo the latest announcement, including papers already shown in a digest |
 | `arxiv-digest run --no-claude` | Choose papers on this computer only, without Claude's picks and explanations |
 | `arxiv-digest run --no-deep-read` | Skip Claude's full-text read of the top picks |
@@ -180,9 +185,23 @@ Less common settings, with their defaults:
 **What leaves your computer:**
 - requests to arXiv, including full-text downloads for deep reads
 - the one-time model download from Hugging Face
-- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read (for **Find something weird**: the 30 most unusual papers' titles, authors and abstracts, and the full text of the 5 picked)
+- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read (for **Find crossovers** and **Find something weird**: your categories and interests, the 30 candidates' titles, authors and abstracts, and the full text of the ones picked)
 
 With `--no-claude`, ranking stays entirely on your computer.
+
+## Find crossovers
+
+**🔭 Find crossovers** (in the app, or `arxiv-digest crossovers`) looks for papers outside your field that could still change how you work: the same problem under another name, or a method from elsewhere that fits yours.
+
+1. **Bridge map.** Claude maps each interest, once and again only when you change it, to:
+   - 2–3 field-neutral statements of its problem. For example, "simulation-based inference for cosmology" becomes "inferring the parameters of a noisy simulator when its likelihood cannot be written down";
+   - 3–6 other arXiv categories where the same problem, method or mathematical structure shows up, each with a reason and the phrases that field uses for it.
+2. arxiv-digest fetches the last 2 days of papers in those categories (up to 12 of them). It leaves out papers whose main category you already watch, and papers already shown in a digest.
+3. On your computer, it scores each paper by how close it is to the problem statements (so the same problem under another name is found), by the bridge phrases it contains, and by how little it sounds like your own field.
+4. Claude picks the 5 best crossovers from the top 30, each with a transferability score from 1 to 10 and what could carry over. It returns fewer when there aren't 5 real ones: a shared buzzword isn't enough.
+5. Claude reads them in full: Method, Results, and **What you could borrow**, which covers how to try it and the main obstacle.
+
+The digest, marked 🔭 crossovers in the list, also shows where Claude looked. For a "flow matching" interest, a test run looked in optimal transport (math.OC), statistical ML, structural biology, PDEs, computational physics and audio. It picked, among others, a review of triangular transport maps for conditional sampling and a paper on unbalanced optimal transport ("flow matching with sources and sinks"), in under a minute. It needs Claude for the bridge map. Nothing is marked as seen.
 
 ## Find something weird
 
@@ -256,7 +275,7 @@ The entry runs the Python environment it was added from (the installer's is `~/.
 
 - **Start page:** a greeting with your latest digest's numbers (new, shortlisted, picked) and a **Run today's digest** button. Below it, your interests appear as coloured chips: click one to edit it in a side panel, or click **+ Add interest**. **Save** keeps the changes; **Save and re-run latest announcement** also shows today's papers again, chosen for the updated interests.
 - **Digests:** every digest you've made, newest first, with older/newer links. **Save digest** at the top of one downloads it as HTML or Markdown.
-- **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Deep read, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away. **🌀 Find something weird** uses the same tracker.
+- **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Deep read, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away. **🔭 Find crossovers** and **🌀 Find something weird** use the same tracker.
 - **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, and set the digest size and Claude model. Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
 
 **Background:** the app shows a night-sky image behind dark, translucent panels: a dark indigo sky with a soft copper and teal light trail. Set `app_background = "none"` in the config to turn it off, or point it at your own `.jpg`, `.png` or `.webp` file. The image is original artwork drawn entirely by code (`tools/make_background.py`, no photos involved). Regenerate it, or try another seed, with `uv run --with pillow python tools/make_background.py src/arxiv_digest/assets/background.jpg 12`.

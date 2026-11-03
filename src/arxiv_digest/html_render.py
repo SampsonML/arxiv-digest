@@ -13,19 +13,18 @@ from functools import cache
 from html import escape
 from importlib import resources
 
-from .digest import Digest, Entry
+from .digest import LABELS, Digest, Entry
 from .render import (
     MAX_AUTHORS,
     author_list,
+    bridge_lines,
     deep_read_source,
-    deep_why_label,
     empty_text,
     evidence_parts,
     footer_text,
     short_comment,
     stats_text,
     top_heading,
-    why_label,
 )
 
 KATEX_VERSION = "0.19.1"
@@ -111,7 +110,9 @@ def _gauge(relevance: int, label: str = "Relevance") -> str:
     )
 
 
-def _entry(entry: Entry, number: int | None, colors: dict[str, str], weird: bool = False) -> str:
+def _entry(entry: Entry, number: int | None, colors: dict[str, str], kind: str = "digest") -> str:
+    labels = LABELS.get(kind, LABELS["digest"])
+    weird = kind == "weird"
     paper = entry.paper
     color = _color_for(colors, entry.interest)
     num = f'<span class="num">{number}.</span> ' if number is not None else ""
@@ -126,14 +127,14 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str], weird: bool
     classes += " has-gauge" if entry.relevance is not None else ""
     parts = [f'<div class="{classes}" id="paper-{_e(paper.id)}" style="--tag: {color}">']
     if entry.relevance is not None:
-        parts.append(_gauge(entry.relevance, "Weirdness" if weird else "Relevance"))
+        parts.append(_gauge(entry.relevance, labels.score.capitalize()))
     parts += [
         f"<h3>{num}{_link(paper.abs_url, paper.title)}</h3>",
         f'<p class="meta">{" · ".join(meta)}</p>',
         f'<p class="authors">{_authors(entry)}</p>',
     ]
     if entry.why:
-        parts.append(f'<p class="why"><strong>{why_label(weird)}:</strong> {_e(entry.why)}</p>')
+        parts.append(f'<p class="why"><strong>{_e(labels.why)}:</strong> {_e(entry.why)}</p>')
     if entry.deep_read:
         read = entry.deep_read
         parts += [
@@ -143,7 +144,7 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str], weird: bool
             "<dl>",
             f"<dt>Method</dt><dd>{_e(read.method)}</dd>",
             f"<dt>Results</dt><dd>{_e(read.results)}</dd>",
-            f"<dt>{deep_why_label(weird)}</dt><dd>{_e(read.why)}</dd>",
+            f"<dt>{_e(labels.deep_why)}</dt><dd>{_e(read.why)}</dd>",
             "</dl>",
             "</div>",
         ]
@@ -153,7 +154,7 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str], weird: bool
         entry.interest,
         None,
         with_interest=number is not None and not weird,
-        weird=weird,
+        kind=kind,
     )
     if evidence:
         if number is not None:
@@ -162,7 +163,7 @@ def _entry(entry: Entry, number: int | None, colors: dict[str, str], weird: bool
             line = " · ".join([evidence[0], *rest]) if rest else evidence[0]
         else:
             line = " · ".join(_e(p) for p in evidence)
-        parts.append(f'<p class="matched">{"Found" if weird else "Matched"}: {line}</p>')
+        parts.append(f'<p class="matched">{_e(labels.evidence)}: {line}</p>')
     parts += [
         "<details><summary>Abstract</summary>",
         f"<p>{_e(paper.abstract)}</p>",
@@ -178,7 +179,7 @@ def digest_body(digest: Digest) -> str:
     if digest.weird:
         colors = {name: WEIRD_COLOR for name in digest.interests}
     out = [
-        f'<article class="digest{" weird" if digest.weird else ""}">',
+        f'<article class="digest {_e(digest.kind)}">',
         "<header>",
         f"<h1>{_e(digest.title)}</h1>",
         f'<p class="stats">{_e(stats_text(digest))}</p>',
@@ -186,6 +187,15 @@ def digest_body(digest: Digest) -> str:
     ]
     for note in digest.notes:
         out.append(f'<p class="note"><strong>Note:</strong> {_e(note)}</p>')
+    if digest.bridges:
+        items = "".join(
+            f'<li><span class="bridge-interest">{_e(interest)}</span> → {_e(where)}</li>'
+            for interest, where in bridge_lines(digest)
+        )
+        out.append(
+            '<details class="bridges"><summary>Where Claude looked for crossovers</summary>'
+            f"<ul>{items}</ul></details>"
+        )
     out.append("</header>")
     if not digest.entries:
         out.append(f'<p class="empty">{_e(empty_text(digest))}</p>')
@@ -193,7 +203,7 @@ def digest_body(digest: Digest) -> str:
         if digest.top:
             out += ['<section class="top-picks">', f"<h2>{_e(top_heading(digest))}</h2>"]
             out += [
-                _entry(entry, number, colors, digest.weird)
+                _entry(entry, number, colors, digest.kind)
                 for number, entry in enumerate(digest.top, start=1)
             ]
             out.append("</section>")

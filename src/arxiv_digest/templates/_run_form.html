@@ -4,12 +4,21 @@
     <button type="submit" class="primary big"{% if job.state == 'running' %} disabled{% endif %}>
       {% if job.state == 'running' %}Running…{% else %}Run today's digest{% endif %}
     </button>
+    <button type="submit" formaction="/crossover" class="crossover big"{% if job.state == 'running' %} disabled{% endif %}
+      title="Papers from other fields whose methods, data or ideas could carry over to your interests, each read in full by Claude">
+      <span aria-hidden="true">🔭</span> Find crossovers
+    </button>
     <button type="submit" formaction="/weird" class="weird big"{% if job.state == 'running' %} disabled{% endif %}
       title="The 5 most unusual papers in the latest announcement in your categories, whatever your interests, each read in full by Claude">
       <span aria-hidden="true">🌀</span> Find something weird
     </button>
   </div>
   <div class="options">
+    <label class="days">Papers from
+      <select name="days" title="Since the last run: only papers you haven't been through yet. A fixed window looks at all of it again, skipping only papers already shown in a digest.">
+        {% for value, label in day_choices %}<option value="{{ value if value is not none else '' }}">{{ label }}</option>{% endfor %}
+      </select>
+    </label>
     <label><input type="checkbox" name="use_claude" checked> Let Claude choose and explain</label>
     <label><input type="checkbox" name="deep_read" checked> Deep-read the top picks (full text)</label>
     <label><input type="checkbox" name="include_seen"> Include papers already shown</label>

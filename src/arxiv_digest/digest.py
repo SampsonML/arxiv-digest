@@ -19,6 +19,50 @@ from .rank import Pick
 
 
 @dataclass(frozen=True)
+class Labels:
+    """The words a kind of digest uses (shared by Markdown, HTML and the app)."""
+
+    name: str  # title prefix
+    top: str  # heading of the main section
+    why: str  # Claude's one-line reason
+    deep_why: str  # the third part of a deep read
+    score: str  # what Claude's 1-10 score measures
+    evidence: str  # the line with the local evidence
+    empty: str  # when nothing was picked
+
+
+LABELS = {
+    "digest": Labels(
+        "arXiv digest",
+        "⭐ Top picks",
+        "Why",
+        "Why it matters",
+        "relevance",
+        "Matched",
+        "No new papers matched your interests this time.",
+    ),
+    "weird": Labels(
+        "Something weird",
+        "🌀 The weird ones",
+        "Why it's weird",
+        "Why it's weird",
+        "weirdness",
+        "Found",
+        "Nothing weird turned up this time.",
+    ),
+    "crossover": Labels(
+        "Crossovers",
+        "🔭 Crossovers",
+        "The crossover",
+        "What you could borrow",
+        "transferability",
+        "Found",
+        "No crossovers turned up this time.",
+    ),
+}
+
+
+@dataclass(frozen=True)
 class Evidence:
     """The local match for the interest a paper is filed under."""
 
@@ -54,17 +98,25 @@ class Digest:
     notes: list[str] = field(default_factory=list)
     entries: list[Entry] = field(default_factory=list)
     version: str = __version__
-    kind: str = "digest"  # "digest" (your interests) or "weird" (Find something weird)
+    # "digest" (your interests), "weird" (Find something weird) or "crossover"
+    # (Find crossovers)
+    kind: str = "digest"
+    # Crossover digests: where Claude looked, as dicts with interest, category,
+    # field and why (see crossover.py).
+    bridges: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def weird(self) -> bool:
         return self.kind == "weird"
 
     @property
+    def labels(self) -> Labels:
+        return LABELS.get(self.kind, LABELS["digest"])
+
+    @property
     def title(self) -> str:
         g = self.generated
-        name = "Something weird" if self.weird else "arXiv digest"
-        return f"{name} — {g:%a} {g.day} {g:%b %Y}"
+        return f"{self.labels.name} — {g:%a} {g.day} {g:%b %Y}"
 
     @property
     def top(self) -> list[Entry]:
@@ -88,6 +140,7 @@ class Digest:
         return {
             "version": self.version,
             "kind": self.kind,
+            "bridges": self.bridges,
             "generated": self.generated.isoformat(),
             "categories": self.categories,
             "interests": self.interests,
@@ -160,6 +213,7 @@ class Digest:
             entries=entries,
             version=data.get("version", ""),
             kind=data.get("kind", "digest"),
+            bridges=[dict(b) for b in data.get("bridges", [])],
         )
 
 

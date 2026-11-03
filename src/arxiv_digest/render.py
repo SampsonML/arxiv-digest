@@ -11,7 +11,7 @@ import re
 from collections.abc import Sequence
 from datetime import datetime
 
-from .digest import Digest, Entry, Evidence
+from .digest import LABELS, Digest, Entry, Evidence, Labels
 from .matching import match_authors
 from .models import Paper
 
@@ -53,17 +53,26 @@ def evidence_parts(
     relevance: int | None,
     *,
     with_interest: bool,
-    weird: bool = False,
+    kind: str = "digest",
 ) -> list[str]:
     """The pieces of the "Matched" line (shared with the HTML view)."""
     parts = []
     if with_interest:
         parts.append(interest)
     if relevance is not None:
-        parts.append(f"{'weirdness' if weird else 'relevance'} {relevance}/10")
+        parts.append(f"{LABELS.get(kind, LABELS['digest']).score} {relevance}/10")
     if evidence is None:
         return parts
-    if weird:  # "Find something weird": how isolated the paper is
+    if kind == "crossover":  # how close its problem is to the interest's
+        if evidence.rank is not None and evidence.of is not None:
+            text = f"#{evidence.rank} of {evidence.of} by problem similarity"
+            if evidence.similarity is not None:
+                text += f" ({evidence.similarity:.2f})"
+            parts.append(text)
+        if evidence.keywords:
+            parts.append("phrases: " + ", ".join(evidence.keywords))
+        return parts
+    if kind == "weird":  # "Find something weird": how isolated the paper is
         if evidence.rank is not None and evidence.of is not None:
             text = f"#{evidence.rank} most unusual of {evidence.of}"
             if evidence.similarity is not None:
@@ -104,15 +113,7 @@ def deep_read_source(entry: Entry) -> str:
     return f"Claude read the full text ({read.source}{', cut short' if read.truncated else ''})"
 
 
-def why_label(weird: bool) -> str:
-    return "Why it's weird" if weird else "Why"
-
-
-def deep_why_label(weird: bool) -> str:
-    return "Why it's weird" if weird else "Why it matters"
-
-
-def _deep_read(entry: Entry, weird: bool) -> list[str]:
+def _deep_read(entry: Entry, labels: Labels) -> list[str]:
     read = entry.deep_read
     assert read is not None
     return [
@@ -120,12 +121,13 @@ def _deep_read(entry: Entry, weird: bool) -> list[str]:
         "",
         f"- **Method:** {_safe(read.method)}",
         f"- **Results:** {_safe(read.results)}",
-        f"- **{deep_why_label(weird)}:** {_safe(read.why)}",
+        f"- **{labels.deep_why}:** {_safe(read.why)}",
         "",
     ]
 
 
-def _entry(entry: Entry, heading: str, *, with_interest: bool, weird: bool = False) -> list[str]:
+def _entry(entry: Entry, heading: str, *, with_interest: bool, kind: str = "digest") -> list[str]:
+    labels = LABELS.get(kind, LABELS["digest"])
     paper = entry.paper
     lines = [
         f"{heading} {_safe(paper.title)}",
@@ -136,17 +138,17 @@ def _entry(entry: Entry, heading: str, *, with_interest: bool, weird: bool = Fal
         "",
     ]
     if entry.why:
-        lines += [f"**{why_label(weird)}:** {_safe(entry.why)}", ""]
+        lines += [f"**{labels.why}:** {_safe(entry.why)}", ""]
     if entry.deep_read:
-        lines += _deep_read(entry, weird)
+        lines += _deep_read(entry, labels)
     parts = evidence_parts(
-        entry.evidence, entry.interest, entry.relevance, with_interest=with_interest, weird=weird
+        entry.evidence, entry.interest, entry.relevance, with_interest=with_interest, kind=kind
     )
     if with_interest and parts:
         parts[0] = f"*{parts[0]}*"
     if parts:
         # With Claude's explanation present, the local evidence is a quieter footnote.
-        word = "Found" if weird else "Matched"
+        word = labels.evidence
         label = f"*{word}:*" if entry.why else f"**{word}:**"
         lines += [f"{label} " + " · ".join(parts), ""]
     lines += [
@@ -165,6 +167,11 @@ def window_text(start: datetime, end: datetime) -> str:
 
 
 def stats_text(digest: Digest) -> str:
+    if digest.kind == "crossover":
+        return (
+            f"{digest.new_papers} recent papers in {', '.join(digest.categories)}"
+            f" · {digest.shortlisted} candidates · {len(digest.entries)} picked"
+        )
     if digest.weird:
         return (
             f"{digest.new_papers} papers in the latest announcement in"
@@ -185,19 +192,36 @@ def footer_text(digest: Digest) -> str:
 
 
 def top_heading(digest: Digest) -> str:
-    return "🌀 The weird ones" if digest.weird else "⭐ Top picks"
+    return digest.labels.top
 
 
 def empty_text(digest: Digest) -> str:
-    if digest.weird:
-        return "Nothing weird turned up this time."
-    return "No new papers matched your interests this time."
+    return digest.labels.empty
+
+
+def bridge_lines(digest: Digest) -> list[tuple[str, str]]:
+    """Crossover digests: (interest, "category (field): why") for each bridge."""
+    lines = []
+    for bridge in digest.bridges:
+        where = bridge.get("category", "")
+        if bridge.get("field"):
+            where += f" ({bridge['field']})"
+        if bridge.get("why"):
+            where += f": {bridge['why']}"
+        lines.append((bridge.get("interest", ""), where))
+    return lines
 
 
 def render_markdown(digest: Digest) -> str:
     lines = [f"# {digest.title}", "", stats_text(digest), "", f"> {digest.ranked_by}", ""]
     for note in digest.notes:
         lines += [f"> **Note:** {note}", ""]
+    if digest.bridges:
+        lines += ["**Where Claude looked for crossovers:**", ""]
+        lines += [
+            f"- *{_safe(interest)}* → {_safe(where)}" for interest, where in bridge_lines(digest)
+        ]
+        lines.append("")
 
     if not digest.entries:
         lines += [empty_text(digest), ""]
@@ -206,7 +230,7 @@ def render_markdown(digest: Digest) -> str:
             lines += [f"## {top_heading(digest)}", ""]
             for number, entry in enumerate(digest.top, start=1):
                 lines += _entry(
-                    entry, f"### {number}.", with_interest=not digest.weird, weird=digest.weird
+                    entry, f"### {number}.", with_interest=not digest.weird, kind=digest.kind
                 )
         for interest, entries in digest.groups():
             lines += [f"## {interest} ({len(entries)})", ""]

@@ -58,12 +58,35 @@ SAVE_FORMATS = {  # the digest page's Save menu: kind -> (file suffix, media typ
 RunFunction = Callable[[cfg.Config, RunOptions, Callable[[str], None]], RunResult]
 
 
+DAY_CHOICES = [  # the run form's "Papers from" menu: (days, label); None = the default
+    (None, "Since the last run"),
+    (1, "The last day"),
+    (2, "The last 2 days"),
+    (3, "The last 3 days"),
+    (7, "The last week"),
+    (14, "The last 2 weeks"),
+]
+
+
+def _days(value: Any) -> float | None:
+    """The run form's "Papers from" choice, or None for the default window."""
+    try:
+        days = float(str(value or "").strip())
+    except ValueError:
+        return None
+    return days if 0 < days <= 60 else None
+
+
 def _default_run(config: cfg.Config, options: RunOptions, log: Callable[[str], None]) -> RunResult:
     progress = getattr(log, "step", None)  # the Runner's reporter tracks steps too
     if options.mode == "weird":
         from .weird import run_weird_with_config
 
         run = run_weird_with_config
+    elif options.mode == "crossover":
+        from .crossover import run_crossovers_with_config
+
+        run = run_crossovers_with_config
     else:
         run = run_with_config
     if progress is None:
@@ -86,7 +109,7 @@ class Job:
     counts: dict[str, int | None] = field(default_factory=dict)
     claude_used: bool = False
     deep_used: bool = False
-    mode: str = "digest"  # or "weird" (Find something weird)
+    mode: str = "digest"  # or "weird" (Find something weird), "crossover" (Find crossovers)
 
 
 class _Reporter:
@@ -152,10 +175,16 @@ class Runner:
             picked=len(result.picks),
         )
         if result.digest is None:
+            if job.mode == "crossover":
+                job.message = result.notes[-1] if result.notes else "No crossovers found."
+            elif job.mode == "weird":
+                job.message = "No papers in the latest announcement."
+            else:
+                job.message = "No new papers since the last run."
+        elif job.mode == "crossover":
             job.message = (
-                "No papers in the latest announcement."
-                if job.mode == "weird"
-                else "No new papers since the last run."
+                f"{len(result.new_papers)} papers in other fields · {len(result.shortlisted)}"
+                f" candidates · {len(result.picks)} crossovers picked"
             )
         elif job.mode == "weird":
             job.message = (
@@ -555,6 +584,7 @@ def create_app(
             version=__version__,
             job=runner.job,
             sign_in_hint=SIGN_IN_HINT,
+            day_choices=DAY_CHOICES,
             **context,
         )
         return HTMLResponse(html, status_code=status)
@@ -584,11 +614,11 @@ def create_app(
                 "new": row["new"],
                 "markdown_path": row["markdown_path"],
                 "html_path": row["html_path"],
-                "weird": row["kind"] == "weird",
+                "kind": row["kind"],
             }
             for row in rows
         ]
-        latest_row = next((row for row in rows if row["kind"] != "weird"), None)
+        latest_row = next((row for row in rows if row["kind"] == "digest"), None)
         now = datetime.now().astimezone()
         hero: dict[str, Any] = {
             "greeting": greeting(now),
@@ -740,6 +770,7 @@ def create_app(
             return RedirectResponse("/settings", status_code=303)
         form = await request.form()
         options = RunOptions(
+            days=_days(form.get("days")),
             include_seen=form.get("include_seen") == "on",
             use_claude=form.get("use_claude") == "on",  # unchecked boxes aren't sent
             deep_read=form.get("deep_read") == "on",
@@ -747,21 +778,27 @@ def create_app(
         runner.start(conf, options)  # if one is already running, just show it
         return RedirectResponse("/run", status_code=303)
 
-    async def start_weird(request: Request) -> Response:
-        """Find something weird: the 5 most unusual papers in the latest announcement."""
-        if not await check_csrf(request):
-            return Response("Invalid or missing form token; reload the page.", status_code=403)
-        conf, problem = load_config()
-        if conf is None:
-            return RedirectResponse("/settings", status_code=303)
-        form = await request.form()
-        options = RunOptions(
-            mode="weird",
-            use_claude=form.get("use_claude") == "on",
-            deep_read=form.get("deep_read") == "on",
-        )
-        runner.start(conf, options)
-        return RedirectResponse("/run", status_code=303)
+    def start_mode(mode: str) -> Callable[[Request], Any]:
+        async def start(request: Request) -> Response:
+            if not await check_csrf(request):
+                return Response("Invalid or missing form token; reload the page.", status_code=403)
+            conf, problem = load_config()
+            if conf is None:
+                return RedirectResponse("/settings", status_code=303)
+            form = await request.form()
+            options = RunOptions(
+                mode=mode,
+                days=_days(form.get("days")),
+                use_claude=form.get("use_claude") == "on",
+                deep_read=form.get("deep_read") == "on",
+            )
+            runner.start(conf, options)
+            return RedirectResponse("/run", status_code=303)
+
+        return start
+
+    start_weird = start_mode("weird")  # Find something weird
+    start_crossover = start_mode("crossover")  # Find crossovers
 
     def job_status() -> dict[str, Any]:
         job = runner.job
@@ -924,6 +961,7 @@ def create_app(
             Route("/digest/{digest_id:int}/save/{kind}", save_digest),
             Route("/run", start_run, methods=["POST"]),
             Route("/weird", start_weird, methods=["POST"]),
+            Route("/crossover", start_crossover, methods=["POST"]),
             Route("/run", run_page, methods=["GET"]),
             Route("/run/status", run_status),
             Route("/health", health),

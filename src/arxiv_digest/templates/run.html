@@ -2,7 +2,7 @@
 {% block title %}Run · arxiv-digest{% endblock %}
 {% block main %}
 <main class="page">
-  <h1>{% if job.mode == 'weird' and job.state != 'idle' %}Finding something weird{% else %}Run{% endif %}</h1>
+  <h1>{% if job.mode == 'weird' and job.state != 'idle' %}Finding something weird{% elif job.mode == 'crossover' and job.state != 'idle' %}Finding crossovers{% else %}Run{% endif %}</h1>
   {% if job.state == 'idle' %}
   <section class="card">
     <p class="muted">Nothing is running. Start a new digest:</p>
@@ -46,7 +46,9 @@
   function render(job) {
     const c = job.counts || {};
     const weird = job.mode === "weird";
-    tracker.querySelector('[data-step="shortlist"] .label').textContent = weird ? "Most unusual" : "Shortlist";
+    const crossover = job.mode === "crossover";
+    tracker.querySelector('[data-step="shortlist"] .label').textContent =
+      weird ? "Most unusual" : crossover ? "Candidates" : "Shortlist";
     const finished = job.state === "done";
     const failed = job.state === "error";
     let active = job.step === "write" ? 4 : Math.max(0, ORDER.indexOf(job.step));
@@ -61,7 +63,7 @@
     });
     const counts = {
       fetch: c.total ? n(c.fetched) + " / " + n(c.total) : c.fetched ? n(c.fetched) + " papers" : "",
-      shortlist: c.new !== undefined ? n(c.new) + (weird ? " papers" : " new") + (c.shortlisted !== undefined ? " → " + n(c.shortlisted) : "") : "",
+      shortlist: c.new !== undefined ? n(c.new) + (weird || crossover ? " papers" : " new") + (c.shortlisted !== undefined ? " → " + n(c.shortlisted) : "") : "",
       claude: claudeSkipped ? "skipped" : c.shortlisted !== undefined && job.claude_used ? (active > 2 ? "read " : "reading ") + n(c.shortlisted) : "",
       deep_read: deepSkipped ? "skipped" : job.deep_used ? (active > 3 ? "read " : "reading ") + n(c.deep) + " in full" : "",
       done: finished ? n(c.picked) + " picked" : job.step === "write" ? "saving…" : ""

@@ -248,36 +248,25 @@ def run(
             err.print(f"  Opened {url} (save it as HTML or Markdown from there)")
 
 
-@app.command()
-def weird(
-    config: ConfigOption = None,
-    no_claude: Annotated[
-        bool,
-        typer.Option("--no-claude", help="Just the most isolated papers, without Claude."),
-    ] = False,
-    no_deep_read: Annotated[
-        bool, typer.Option("--no-deep-read", help="Skip Claude's full-text reads.")
-    ] = False,
-    no_open: Annotated[
-        bool, typer.Option("--no-open", help="Don't open the digest in the web app.")
-    ] = False,
-    show: Annotated[
-        bool, typer.Option("--print", help="Also print the digest to the terminal.")
-    ] = False,
+def _side_search(
+    mode: str,
+    config: Path | None,
+    *,
+    days: float | None,
+    no_claude: bool,
+    no_deep_read: bool,
+    no_open: bool,
+    show: bool,
 ) -> None:
-    """Find something weird: the 5 most unusual papers in the latest announcement.
-
-    Your interests play no part. The local model finds the papers least like the
-    rest; Claude picks the weirdest, reads them in full and says why they're weird.
-    """
-    from .weird import run_weird_with_config
-
+    """Find something weird / Find crossovers from the terminal."""
     conf = _load(config)
-    options = RunOptions(mode="weird", use_claude=not no_claude, deep_read=not no_deep_read)
+    options = RunOptions(mode=mode, days=days, use_claude=not no_claude, deep_read=not no_deep_read)
+    if mode == "weird":
+        from .weird import run_weird_with_config as run_mode
+    else:
+        from .crossover import run_crossovers_with_config as run_mode
     try:
-        result = run_weird_with_config(
-            conf, options, log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]")
-        )
+        result = run_mode(conf, options, log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]"))
     except ArxivError as exc:
         _fail(str(exc))
     for note in result.notes:
@@ -287,7 +276,7 @@ def weird(
     if show:
         out.print(result.markdown, markup=False, highlight=False)
     err.print(
-        f"[green]{len(result.new_papers)} papers · {len(result.shortlisted)} most unusual ·"
+        f"[green]{len(result.new_papers)} papers · {len(result.shortlisted)} candidates ·"
         f" {len(result.picks)} picked[/green] · digest #{result.digest_id}"
     )
     if not no_open:
@@ -300,6 +289,74 @@ def weird(
             err.print(f"[yellow]Couldn't open the app:[/yellow] {escape(str(exc))}")
         else:
             err.print(f"  Opened {url}")
+
+
+DaysOption = Annotated[
+    float | None, typer.Option(help="Look at the last N days instead of the default window.")
+]
+NoClaudeOption = Annotated[
+    bool, typer.Option("--no-claude", help="Local ranking only, without Claude's explanations.")
+]
+NoDeepReadOption = Annotated[
+    bool, typer.Option("--no-deep-read", help="Skip Claude's full-text reads.")
+]
+NoOpenOption = Annotated[
+    bool, typer.Option("--no-open", help="Don't open the digest in the web app.")
+]
+PrintOption = Annotated[
+    bool, typer.Option("--print", help="Also print the digest to the terminal.")
+]
+
+
+@app.command()
+def weird(
+    config: ConfigOption = None,
+    days: DaysOption = None,
+    no_claude: NoClaudeOption = False,
+    no_deep_read: NoDeepReadOption = False,
+    no_open: NoOpenOption = False,
+    show: PrintOption = False,
+) -> None:
+    """Find something weird: the 5 most unusual papers in the latest announcement.
+
+    Your interests play no part. The local model finds the papers least like the
+    rest; Claude picks the weirdest, reads them in full and says why they're weird.
+    """
+    _side_search(
+        "weird",
+        config,
+        days=days,
+        no_claude=no_claude,
+        no_deep_read=no_deep_read,
+        no_open=no_open,
+        show=show,
+    )
+
+
+@app.command()
+def crossovers(
+    config: ConfigOption = None,
+    days: DaysOption = None,
+    no_claude: NoClaudeOption = False,
+    no_deep_read: NoDeepReadOption = False,
+    no_open: NoOpenOption = False,
+    show: PrintOption = False,
+) -> None:
+    """Find crossovers: papers from other fields that could carry over to your interests.
+
+    Claude maps each interest to other fields (once per change), the local model
+    finds papers there that tackle the same problems, and Claude picks the 5 best,
+    reads them in full and says what you could borrow. Default window: 2 days.
+    """
+    _side_search(
+        "crossover",
+        config,
+        days=days,
+        no_claude=no_claude,
+        no_deep_read=no_deep_read,
+        no_open=no_open,
+        show=show,
+    )
 
 
 # ---------------------------------------------------------------------------

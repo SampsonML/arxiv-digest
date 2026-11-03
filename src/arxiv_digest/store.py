@@ -21,6 +21,7 @@ import sqlite3
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -147,6 +148,19 @@ class Store:
             rows = self.db.execute(
                 f"SELECT id FROM seen WHERE id IN ({marks}) AND (shown = 1 OR fingerprint = ?)",
                 [*chunk, fingerprint],
+            )
+            found.update(row[0] for row in rows)
+        return found
+
+    def shown_ids(self, ids: Iterable[str]) -> set[str]:
+        """Papers that appeared in a digest before."""
+        ids = list(ids)
+        found: set[str] = set()
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = self.db.execute(
+                f"SELECT id FROM seen WHERE id IN ({marks}) AND shown = 1", chunk
             )
             found.update(row[0] for row in rows)
         return found
@@ -319,6 +333,18 @@ class Store:
             self.db.execute(
                 "INSERT OR REPLACE INTO expansions (key, terms, created) VALUES (?, ?, ?)",
                 (key, json.dumps(list(terms)), _iso(datetime.now(UTC))),
+            )
+
+    def get_cached(self, key: str) -> Any:
+        """Any JSON value kept in the expansions table (e.g. crossover bridge maps)."""
+        row = self.db.execute("SELECT terms FROM expansions WHERE key = ?", (key,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def put_cached(self, key: str, value: Any) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO expansions (key, terms, created) VALUES (?, ?, ?)",
+                (key, json.dumps(value), _iso(datetime.now(UTC))),
             )
 
     # -- housekeeping -------------------------------------------------------

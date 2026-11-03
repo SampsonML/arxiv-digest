@@ -92,3 +92,23 @@ def test_upgrade_from_schema_3_marks_digest_papers_as_shown(tmp_path):
     # Shown before: always skipped. Only considered: looked at again once.
     assert store.skip_ids(["2611.00001", "2611.00002"], "any") == {"2611.00001"}
     assert store.list_digests()[0]["kind"] == "digest"
+
+
+def test_an_explicit_window_looks_again_but_skips_shown_papers(tmp_path, make_config):
+    from arxiv_digest.pipeline import RunOptions
+
+    store = Store(tmp_path / "db.sqlite3")
+    papers = _papers()
+    first = _run(make_config(), store, papers)
+    shown = {p.candidate.paper.id for p in first.picks}
+    again = run_digest(
+        make_config(),
+        store,
+        FakeClient(papers),
+        FakeEmbedder(),
+        RunOptions(days=3),
+        log=lambda m: None,
+        now=NOW,
+    )
+    ids = {p.id for p in again.new_papers}
+    assert ids == {p.id for p in papers} - shown  # considered ones come back, shown ones don't

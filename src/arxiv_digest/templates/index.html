@@ -92,7 +92,7 @@
     <tbody>
     {% for d in digests %}
       <tr>
-        <td><a href="/digest/{{ d.id }}">{{ d.when.strftime("%a") }} {{ d.when.day }} {{ d.when.strftime("%b %Y, %H:%M") }}</a>{% if d.weird %} <span class="weird-badge">🌀 weird</span>{% endif %}</td>
+        <td><a href="/digest/{{ d.id }}">{{ d.when.strftime("%a") }} {{ d.when.day }} {{ d.when.strftime("%b %Y, %H:%M") }}</a>{% if d.kind == 'weird' %} <span class="weird-badge">🌀 weird</span>{% elif d.kind == 'crossover' %} <span class="weird-badge crossover-badge">🔭 crossovers</span>{% endif %}</td>
         <td class="num">{{ d.picked }}</td>
         <td class="num">{{ d.new }}</td>
       </tr>

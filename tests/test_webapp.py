@@ -290,6 +290,28 @@ def test_find_something_weird_runs_in_the_background(config_path):
     assert client.post("/weird", data={"csrf": "wrong"}).status_code == 403
 
 
+def test_crossovers_and_the_days_choice(config_path):
+    seen = []
+
+    def fake_run(conf, options, log):
+        seen.append(options)
+        return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
+
+    client, app = _client(config_path, run=fake_run)
+    page = client.get("/").text
+    assert 'formaction="/crossover"' in page and "Find crossovers" in page
+    assert '<select name="days"' in page and "The last week" in page
+    client.post("/crossover", data={"csrf": TOKEN, "use_claude": "on", "days": "3"})
+    app.state.runner.thread.join(5)
+    client.post("/run", data={"csrf": TOKEN, "days": "7"})
+    app.state.runner.thread.join(5)
+    client.post("/run", data={"csrf": TOKEN, "days": "nonsense"})
+    app.state.runner.thread.join(5)
+    assert (seen[0].mode, seen[0].days) == ("crossover", 3.0)
+    assert (seen[1].mode, seen[1].days) == ("digest", 7.0)
+    assert seen[2].days is None
+
+
 def test_weird_digests_are_marked_in_the_list(config_path):
     digest_id = _save_digest(kind="weird")
     client, _ = _client(config_path)
