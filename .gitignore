@@ -11,3 +11,6 @@ wheels/
 
 # Daily digests written into the project folder (personal; never commit them)
 /digests/
+
+# Notes for Claude Code (local only)
+/CLAUDE.md
