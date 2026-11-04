@@ -26,8 +26,13 @@ dependencies = [
     "jinja2>=3.1",
     "mcp>=2.3",
     "numpy>=1.26",
+    # Listen (audio.py): Piper reads the digest aloud on this computer. It is
+    # GPL-3.0, installed as its own package. It has no Windows-on-ARM wheel, so
+    # it is left out there and the app says audio isn't available.
+    "piper-tts>=1.8 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "pypdf>=4",
     "python-multipart>=0.0.9",
+    "soundfile>=0.13",
     "starlette>=0.40",
     "tomlkit>=0.12",
     "typer>=0.12",

@@ -200,6 +200,10 @@ def run(
             "--save", help="Also save the digest as Markdown and HTML files in output_dir."
         ),
     ] = False,
+    audio: Annotated[
+        bool,
+        typer.Option("--audio", help="Also save the digest read aloud (an MP3) in output_dir."),
+    ] = False,
 ) -> None:
     """Fetch new papers, rank them, and open today's digest in the web app."""
     conf = _load(config)
@@ -232,10 +236,20 @@ def run(
         err.print(f"[green]{summary}[/green] (dry run: nothing kept)")
         return
     err.print(f"[green]{summary}[/green] · digest #{result.digest_id}")
+    md = None
     if save:
         md, html = save_files(result, conf.output_dir)
         err.print(f"  Markdown: {escape(str(md))}")
         err.print(f"  HTML:     {escape(str(html))}")
+    if audio and result.picks and result.digest_id is not None:
+        # The digest is kept already: a problem with the audio is a warning, not a failure.
+        _speak(
+            conf,
+            result.digest_id,
+            use_claude=options.use_claude,
+            target=md.with_suffix(".mp3") if md else None,
+            fail=False,
+        )
     if not no_open:
         from . import launcher
 
@@ -356,6 +370,84 @@ def crossovers(
         no_deep_read=no_deep_read,
         no_open=no_open,
         show=show,
+    )
+
+
+# ---------------------------------------------------------------------------
+# audio
+
+
+def _speak(
+    conf: cfg.Config,
+    digest_id: int,
+    *,
+    use_claude: bool,
+    folder: Path | None = None,
+    target: Path | None = None,
+    fail: bool = True,
+) -> None:
+    """Make a digest's audio and copy it to `target`, or into `folder` (default output_dir)."""
+    from .audio import AudioError, make_audio_with_config, save_copy
+
+    try:
+        result = make_audio_with_config(
+            conf,
+            digest_id,
+            use_claude=use_claude,
+            log=lambda msg: err.print(f"[dim]{escape(msg)}[/dim]"),
+        )
+        saved = save_copy(result, folder or conf.output_dir, target)
+    except (AudioError, OSError) as exc:
+        if fail:
+            _fail(f"Couldn't make the audio: {exc}")
+        err.print(f"[yellow]Couldn't make the audio:[/yellow] {escape(str(exc))}")
+        return
+    for note in result.notes:
+        err.print(f"[yellow]Note:[/yellow] {escape(note)}")
+    minutes = f" ({result.seconds / 60:.0f} min)" if result.seconds else ""
+    err.print(f"  Audio:    {escape(str(saved))}{minutes}")
+
+
+@app.command("audio")
+def audio_command(
+    digest: Annotated[
+        int | None,
+        typer.Argument(
+            help="The digest's number, as in the app (default: the newest).", show_default=False
+        ),
+    ] = None,
+    config: ConfigOption = None,
+    no_claude: Annotated[
+        bool,
+        typer.Option("--no-claude", help="Read the digest as written, without Claude's script."),
+    ] = False,
+    folder: Annotated[
+        Path | None,
+        typer.Option("--folder", help="Where to save the MP3 (default: output_dir)."),
+    ] = None,
+) -> None:
+    """Save a digest read aloud, as an MP3.
+
+    Claude rewrites the digest as a spoken script, and a voice that runs on this
+    computer (Piper) reads it. The first time downloads the voice (about 60 MB).
+    """
+    conf = _load(config)
+    if digest is None:
+        db = paths.database_path()
+        store = Store(db) if db.exists() else None
+        try:
+            rows = store.list_digests(limit=1) if store else []
+        finally:
+            if store:
+                store.close()
+        if not rows:
+            _fail("There are no digests yet. Make one with `arxiv-digest run`.")
+        digest = int(rows[0]["id"])
+    _speak(
+        conf,
+        digest,
+        use_claude=conf.use_claude and not no_claude,
+        folder=folder.expanduser() if folder else None,
     )
 
 
@@ -673,6 +765,16 @@ def status(config: ConfigOption = None) -> None:
                     out.print("           Install it from https://claude.com/claude-code")
             else:
                 out.print("[bold]Claude[/bold]     off (use_claude = false)")
+            from .audio import PiperSpeaker, available
+
+            if available():
+                voice = PiperSpeaker(conf.audio_voice, paths.voices_dir())
+                state = (
+                    "downloaded" if voice.is_downloaded() else "downloads the first time you listen"
+                )
+                out.print(f"[bold]Voice[/bold]      {escape(conf.audio_voice)} ({state})")
+            else:
+                out.print("[bold]Voice[/bold]      not available on this platform")
         except cfg.ConfigError as exc:
             out.print(f"[red]Config problem:[/red] {escape(str(exc))}")
     db = paths.database_path()

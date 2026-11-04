@@ -28,16 +28,27 @@ from urllib.parse import urlparse
 from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from starlette.routing import Route
 
 from . import __version__, launcher, paths
+from . import audio as speech
 from . import categories as cats
 from . import config as cfg
+from .audio import AudioError, AudioResult, PiperSpeaker, existing_audio
+from .audio import available as audio_available
 from .claude_cli import SIGN_IN_HINT, ClaudeCLI, ClaudeStatus
+from .digest import Digest
 from .html_render import (
     KATEX_HEAD,
     KATEX_SCRIPTS,
@@ -56,6 +67,10 @@ SAVE_FORMATS = {  # the digest page's Save menu: kind -> (file suffix, media typ
     "markdown": ("md", "text/markdown; charset=utf-8"),
 }
 RunFunction = Callable[[cfg.Config, RunOptions, Callable[[str], None]], RunResult]
+# Listen: (config, digest id, log, progress) -> the spoken digest (audio.py)
+AudioFunction = Callable[
+    [cfg.Config, int, Callable[[str], None], Callable[[str, dict], None]], AudioResult
+]
 
 
 DAY_CHOICES = [  # the run form's "Papers from" menu: (days, label); None = the default
@@ -196,6 +211,99 @@ class Runner:
                 f"{len(result.new_papers)} new papers · {len(result.shortlisted)} shortlisted"
                 f" · {len(result.picks)} picked"
             )
+        job.state = "done"
+
+
+# ---------------------------------------------------------------------------
+# Listen: a digest read aloud (audio.py)
+
+LISTEN_STEPS = {  # what the Listen panel says during each step (see audio.Progress)
+    "script": "Claude is writing a two-minute segment for each paper…",
+    "voice": "Downloading the voice (one time)…",
+    "speak": "Recording the episode on this computer…",
+    "save": "Saving the MP3…",
+}
+LISTEN_UNITS = {"script": "papers", "speak": "paragraphs"}  # what `done` and `total` count
+
+
+def _default_audio(
+    config: cfg.Config,
+    digest_id: int,
+    log: Callable[[str], None],
+    progress: Callable[[str, dict], None],
+) -> AudioResult:
+    from .audio import make_audio_with_config
+
+    return make_audio_with_config(config, digest_id, log=log, progress=progress)
+
+
+@dataclass
+class AudioJob:
+    digest_id: int
+    state: str = "running"  # running | done | error
+    step: str = ""
+    done: int = 0  # paragraphs spoken so far, of `total`
+    total: int = 0
+    message: str = ""
+    lines: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "digest_id": self.digest_id,
+            "state": self.state,
+            "step": self.step,
+            "step_text": LISTEN_STEPS.get(self.step, "Getting ready…"),
+            "done": self.done,
+            "total": self.total,
+            "unit": LISTEN_UNITS.get(self.step, ""),
+            "message": self.message,
+        }
+
+
+class AudioMaker:
+    """Makes one digest's audio at a time in a background thread (the Listen button)."""
+
+    def __init__(self, make: AudioFunction) -> None:
+        self._make = make
+        self._lock = threading.Lock()
+        self.job: AudioJob | None = None
+        self.thread: threading.Thread | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.job is not None and self.job.state == "running"
+
+    def start(self, config: cfg.Config, digest_id: int) -> bool:
+        with self._lock:
+            if self.running:
+                return False
+            self.job = job = AudioJob(digest_id)
+        self.thread = threading.Thread(target=self._work, args=(job, config), daemon=True)
+        self.thread.start()
+        return True
+
+    def job_for(self, digest_id: int) -> AudioJob | None:
+        job = self.job
+        return job if job is not None and job.digest_id == digest_id else None
+
+    def _work(self, job: AudioJob, config: cfg.Config) -> None:
+        def progress(step: str, details: dict) -> None:
+            job.step = step
+            job.done = int(details.get("done") or 0)
+            job.total = int(details.get("total") or 0)
+
+        try:
+            result = self._make(config, job.digest_id, job.lines.append, progress)
+        except AudioError as exc:
+            job.message = f"Couldn't make the audio: {exc}."
+            job.state = "error"
+            return
+        except Exception as exc:  # shown in the page; the server keeps running
+            job.lines.append("".join(traceback.format_exception_only(exc)).strip())
+            job.message = f"Couldn't make the audio: {str(exc) or exc.__class__.__name__}."
+            job.state = "error"
+            return
+        job.message = " ".join(result.notes)
         job.state = "done"
 
 
@@ -383,6 +491,36 @@ def _split(text: str) -> list[str]:
     return [part.strip() for part in text.replace("\n", ",").split(",") if part.strip()]
 
 
+def _voice_label(voice: str) -> str:
+    """ "en_GB-jenny_dioco-medium" -> "Jenny Dioco"; "en_GB-vctk-medium#p374" -> "VCTK p374"."""
+    model, speaker = speech.split_voice(voice)
+    name = model.split("-")[1] if model.count("-") >= 2 else model
+    name = name.upper() if name == "vctk" else name.replace("_", " ").title()
+    return f"{name} {speaker}" if speaker else name
+
+
+def _voice_picker(current: str | None) -> dict[str, Any] | None:
+    """The Settings page's voices: a row per accent, male then female, plus the config's
+    own voice if it isn't one of them. None where audio isn't available."""
+    if not audio_available():
+        return None
+    rows = []
+    for accent in ("British", "American", "Australian"):
+        cells = []
+        for gender in ("male", "female"):
+            voice = speech.VOICE_CHOICES[(accent, gender)]
+            cells.append(
+                {
+                    "voice": voice,
+                    "label": _voice_label(voice),
+                    "note": speech.VOICE_NOTES.get(voice, ""),
+                }
+            )
+        rows.append((accent, cells))
+    custom = current if current and current not in speech.VOICE_CHOICES.values() else None
+    return {"rows": rows, "custom": custom}
+
+
 def _category_groups(selected: set[str]) -> list[dict[str, Any]]:
     groups: dict[str, list[tuple[str, str]]] = {}
     for code, name in sorted(cats.CATEGORIES.items()):
@@ -416,6 +554,7 @@ class SettingsForm:
                     "use_claude": True,
                     "claude_model": "sonnet",
                     "deep_reads": 3,
+                    "audio_voice": cfg.AUDIO_VOICE,
                 },
             )
         return cls(
@@ -427,6 +566,7 @@ class SettingsForm:
                 "use_claude": conf.use_claude,
                 "claude_model": conf.claude_model,
                 "deep_reads": conf.deep_reads,
+                "audio_voice": conf.audio_voice,
             },
         )
 
@@ -444,17 +584,16 @@ class SettingsForm:
             except ValueError:
                 return raw or default  # a non-number makes validation explain the problem
 
-        return cls(
-            categories=categories,
-            interests=interests,
-            values={
-                "max_papers": number("max_papers", 15),
-                "top_picks": number("top_picks", 3),
-                "use_claude": form.get("use_claude") == "on",
-                "claude_model": str(form.get("claude_model", "sonnet")).strip() or "sonnet",
-                "deep_reads": number("deep_reads", 3),
-            },
-        )
+        values: dict[str, Any] = {
+            "max_papers": number("max_papers", 15),
+            "top_picks": number("top_picks", 3),
+            "use_claude": form.get("use_claude") == "on",
+            "claude_model": str(form.get("claude_model", "sonnet")).strip() or "sonnet",
+            "deep_reads": number("deep_reads", 3),
+        }
+        if form.get("audio_voice"):  # not on the page where audio isn't available
+            values["audio_voice"] = str(form.get("audio_voice")).strip()
+        return cls(categories=categories, interests=interests, values=values)
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +657,7 @@ def create_app(
     config_path: Path | None = None,
     *,
     run: RunFunction = _default_run,
+    make_audio: AudioFunction = _default_audio,
     token: str | None = None,
     account: ClaudeAccount | None = None,
     idle_exit: float | None = None,
@@ -528,6 +668,7 @@ def create_app(
     config_path = config_path or paths.config_path()
     csrf_token = token or secrets.token_urlsafe(32)
     runner = Runner(run)
+    audio_maker = AudioMaker(make_audio)
     activity = Activity()
 
     def current_cli() -> ClaudeCLI:
@@ -736,9 +877,64 @@ def create_app(
             row=row,
             newer=newer,
             older=older,
+            listen=listen_state(row["id"], digest),
             katex_head=Markup(KATEX_HEAD),
             katex_scripts=Markup(KATEX_SCRIPTS),
         )
+
+    def listen_state(digest_id: int, digest: Digest) -> dict[str, Any] | None:
+        """What the digest page shows for Listen: the button, progress or the player."""
+        conf, _ = load_config()
+        if conf is None or not digest.entries or not audio_available():
+            return None
+        job = audio_maker.job_for(digest_id)
+        return {
+            "ready": existing_audio(digest_id, digest, conf.audio_voice) is not None,
+            "job": job.to_dict() if job else None,
+            "busy_elsewhere": audio_maker.running and job is None,
+            "voice": conf.audio_voice,
+            "voice_downloaded": PiperSpeaker(conf.audio_voice, paths.voices_dir()).is_downloaded(),
+            "claude": conf.use_claude,
+            "filename": f"arxiv-digest-{digest.generated:%Y-%m-%d}.mp3",
+        }
+
+    def find_audio(digest_id: int) -> Path | None:
+        conf, _ = load_config()
+        if conf is None:
+            return None
+        store = Store(paths.database_path())
+        try:
+            found = store.get_digest(digest_id)
+        finally:
+            store.close()
+        return existing_audio(digest_id, found[0], conf.audio_voice) if found else None
+
+    async def start_listen(request: Request) -> Response:
+        if not await check_csrf(request):
+            return Response("Invalid or missing form token; reload the page.", status_code=403)
+        conf, _ = load_config()
+        if conf is None:
+            return RedirectResponse("/settings", status_code=303)
+        digest_id = int(request.path_params["digest_id"])
+        audio_maker.start(conf, digest_id)  # if another is being made, the page says so
+        return RedirectResponse(f"/digest/{digest_id}#listen", status_code=303)
+
+    async def listen_status(request: Request) -> Response:
+        digest_id = int(request.path_params["digest_id"])
+        job = audio_maker.job_for(digest_id)
+        return JSONResponse(
+            {
+                "job": job.to_dict() if job else None,
+                "ready": find_audio(digest_id) is not None,
+                "busy": audio_maker.running,
+            }
+        )
+
+    async def listen_file(request: Request) -> Response:
+        path = find_audio(int(request.path_params["digest_id"]))
+        if path is None:
+            return Response("This digest hasn't been read aloud yet.", status_code=404)
+        return FileResponse(path, media_type="audio/mpeg")  # supports seeking (Range)
 
     async def save_digest(request: Request) -> Response:
         """The Save button: the digest as a downloaded HTML or Markdown file."""
@@ -834,7 +1030,11 @@ def create_app(
         )
 
     def busy() -> bool:
-        return runner.job.state == "running" or getattr(account, "login_running", False)
+        return (
+            runner.job.state == "running"
+            or audio_maker.running
+            or getattr(account, "login_running", False)
+        )
 
     def stop_soon() -> None:
         """Stop after the current response has been sent."""
@@ -855,7 +1055,8 @@ def create_app(
                 409,
                 title="Still working",
                 message=(
-                    "A run (or a Claude sign-in) is in progress. Quit again when it has finished."
+                    "A run, a Claude sign-in or a spoken digest is in progress. Quit again"
+                    " when it has finished."
                 ),
             )
         stop_soon()
@@ -916,6 +1117,7 @@ def create_app(
             claude=account.status(),
             form=form,
             groups=_category_groups(set(form.categories)),
+            voices=_voice_picker(form.values.get("audio_voice")),
             models=MODEL_CHOICES,
             deep_read_model=conf.deep_read_model if conf else cfg.DEEP_READ_MODEL,
             problem=problem,
@@ -923,6 +1125,21 @@ def create_app(
             exists=config_path.exists(),
             config_path=str(config_path),
         )
+
+    async def voice_preview(request: Request) -> Response:
+        """A few seconds of a voice from the picker (made, and the voice downloaded, once)."""
+        voice = request.query_params.get("voice", "")
+        conf, _ = load_config()
+        allowed = set(speech.VOICE_CHOICES.values()) | ({conf.audio_voice} if conf else set())
+        if voice not in allowed or not audio_available():
+            return Response("Unknown voice.", status_code=404)
+        try:
+            path = await run_in_threadpool(
+                speech.voice_preview, voice, paths.audio_dir() / "previews"
+            )
+        except AudioError as exc:
+            return Response(f"Couldn't make the preview: {exc}.", status_code=502)
+        return FileResponse(path, media_type="audio/mpeg")
 
     async def save_settings(request: Request) -> Response:
         if not await check_csrf(request):
@@ -943,6 +1160,7 @@ def create_app(
                 claude=account.status(),
                 form=form,
                 groups=_category_groups(set(form.categories)),
+                voices=_voice_picker(form.values.get("audio_voice")),
                 models=MODEL_CHOICES,
                 deep_read_model=current_deep_read_model(),
                 problem=str(exc),
@@ -959,6 +1177,9 @@ def create_app(
             Route("/shortcut", shortcut, methods=["POST"]),
             Route("/digest/{digest_id:int}", show_digest),
             Route("/digest/{digest_id:int}/save/{kind}", save_digest),
+            Route("/digest/{digest_id:int}/audio", start_listen, methods=["POST"]),
+            Route("/digest/{digest_id:int}/audio/status", listen_status),
+            Route("/digest/{digest_id:int}/audio.mp3", listen_file),
             Route("/run", start_run, methods=["POST"]),
             Route("/weird", start_weird, methods=["POST"]),
             Route("/crossover", start_crossover, methods=["POST"]),
@@ -975,6 +1196,7 @@ def create_app(
             Route("/claude/status", claude_status),
             Route("/settings", settings_page, methods=["GET"]),
             Route("/settings", save_settings, methods=["POST"]),
+            Route("/voice-preview", voice_preview),
         ],
         middleware=[
             Middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"]),
@@ -982,6 +1204,7 @@ def create_app(
         ],
     )
     app.state.runner = runner
+    app.state.audio = audio_maker
     app.state.stopping = False
     app.state.activity = activity
     if idle_exit:

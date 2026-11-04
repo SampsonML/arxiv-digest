@@ -67,6 +67,8 @@ Two more buttons sit next to **Run today's digest**:
 
 Digests stay in the app, where you can browse every one you've made. Nothing is written to your disk unless you ask: to keep a digest as a file, press **Save digest** at the top of it and choose **As HTML** (a web page with working links and rendered math) or **As Markdown** (for any editor, GitHub or Obsidian). Your browser downloads it.
 
+**🔊 Listen**, next to **Save digest**, turns a digest into a podcast episode: Claude writes a two-minute segment for each paper, and a voice that runs on your computer reads it (see [Listen](#listen)).
+
 > **Status: v0.5.** A local model shortlists the day's papers. Claude keeps only the genuinely relevant ones, explains why each was chosen, and reads the top picks in full to summarise their method and results. Any digest can be saved as Markdown or HTML. There's a local web app, and an MCP server so Claude Code and Claude Desktop can use your digests directly.
 
 ## From the terminal
@@ -91,6 +93,7 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest init` | Create the config by answering a few questions |
 | `arxiv-digest run` | Make a digest of the papers that are new since the last run, and open it in the app |
 | `arxiv-digest run --save` | The same, and also write it as Markdown and HTML files in `output_dir` |
+| `arxiv-digest run --audio` | The same, and also save it read aloud as an MP3 in `output_dir` (see [Listen](#listen)) |
 | `arxiv-digest run --print` | Also print the digest (Markdown) in the terminal |
 | `arxiv-digest run --no-open` | Don't open the app |
 | `arxiv-digest run --dry-run` | Print the digest instead of keeping it, and remember nothing |
@@ -101,6 +104,7 @@ arXiv announces new papers Sunday to Thursday at about 20:00 US Eastern, with no
 | `arxiv-digest run --no-claude` | Choose papers on this computer only, without Claude's picks and explanations |
 | `arxiv-digest run --no-deep-read` | Skip Claude's full-text read of the top picks |
 | `arxiv-digest run --no-model` | Rank by keywords and followed authors only (no local model) |
+| `arxiv-digest audio [N]` | Save digest N (default: the newest) read aloud, as an MP3 in `output_dir` (`--folder` to choose another, `--no-claude` to read it as written) |
 | `arxiv-digest categories list [--all]` | Your categories, or every arXiv category |
 | `arxiv-digest categories add hep-th` | Watch another category (checked against arXiv's list) |
 | `arxiv-digest categories remove hep-th` | Stop watching a category |
@@ -160,6 +164,7 @@ Less common settings, with their defaults:
 | `deep_read_model` | `"sonnet"` | The model for deep reads. It doesn't follow `claude_model`; set it to e.g. `"opus"` for the most thorough reading |
 | `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | The local model (~90 MB, runs on the CPU). Other [fastembed](https://github.com/qdrant/fastembed) models work too, but in a test on real arXiv papers none of the small ones ranked clearly better, and most took 2–7× the CPU time. |
 | `app_background` | `"default"` | The web app's background: `"default"`, `"none"`, or a path to your own image |
+| `audio_voice` | `"en_GB-alan-medium"` | The voice that reads digests aloud: pick one in **Settings → Voice**, or set any [Piper voice](https://rhasspy.github.io/piper-samples/), e.g. `"en_US-ryan-high"`, with `#speaker` for one speaker of a voice with many, e.g. `"en_GB-vctk-medium#p374"` (see [Listen](#listen)) |
 | `allow_unknown_categories` | `false` | Allow category codes that aren't in the bundled list, e.g. one arXiv added recently |
 
 ## How ranking works
@@ -190,8 +195,10 @@ Less common settings, with their defaults:
 
 **What leaves your computer:**
 - requests to arXiv, including full-text downloads for deep reads
-- the one-time model download from Hugging Face
-- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read (for **Find crossovers** and **Find something weird**: your categories and interests, the 30 candidates' titles, authors and abstracts, and the full text of the ones picked)
+- the one-time model download from Hugging Face, and the one-time voice download the first time you use **Listen**
+- when Claude is used, sent to Anthropic through Claude Code: your interests, the shortlisted titles, authors and abstracts, and the full text of the papers that get a deep read (for **Find crossovers** and **Find something weird**: your categories and interests, the 30 candidates' titles, authors and abstracts, and the full text of the ones picked; for **Listen**: each paper's title, authors, abstract, Claude's reason and deep read, to write its segment)
+
+The voice for **Listen** runs on your computer: no audio service is involved.
 
 With `--no-claude`, ranking stays entirely on your computer.
 
@@ -220,6 +227,31 @@ The digest, marked 🔭 crossovers in the list, also shows where Claude looked. 
 
 The result is a digest of its own, marked 🌀 weird in the list, which you can save like any other. Nothing is marked as seen, so your normal digests are unaffected. A run over all of computer science (about 1,700 papers) took under a minute in testing. Without Claude, you get the 5 most isolated papers without explanations.
 
+## Listen
+
+**🔊 Listen**, at the top of any digest in the app, turns the digest into a podcast episode:
+
+1. For each paper, Claude writes a segment of about two minutes, the way a science podcaster would: a hook, the context, what the authors did and found, why it matters for your interest, and the main caveat. Math is said in words ("Lambda-CDM", "sigma eight"), and links and arXiv numbers are left out. Claude works from the abstract, its reason for picking the paper and, for the top picks, the deep read, and adds nothing to what the paper claims. It writes 3 segments at a time, and each is kept, so a paper is never written up twice.
+2. The episode follows the digest page: an opening, a short lead-in to each paper ("Top pick number one", "Next, Weak lensing, with 3 papers"), and a sign-off.
+3. A voice on your computer, [Piper](https://github.com/OHF-Voice/piper1-gpl), records it. It runs on the CPU, like the local ranking model. The voice is downloaded from Hugging Face the first time (about 60 MB).
+4. The app shows a player, and **Save digest → As audio (MP3)** downloads it. Each digest is recorded once; after that, it plays straight away.
+
+From the terminal, `arxiv-digest audio` saves the newest digest's audio as `YYYY-MM-DD.mp3` in `output_dir`, and `arxiv-digest run --audio` does the same for each new digest. If `output_dir` syncs to your phone, that makes a daily briefing to listen to on the go.
+
+In testing, a 7-paper digest became a 14-minute episode (5.6 MB) in about a minute, with segments of 1.7 to 2.1 minutes each. A full digest of 15 papers makes an episode of about half an hour. Without Claude, each paper is read as written: title, authors, Claude's reason, then the deep read or the abstract, with simple rules for math, which cope less well with heavy notation.
+
+**Choosing the voice.** **Settings → Voice** offers British, American and Australian voices, male and female, each with a **▶ Preview** button. Each was picked from Piper's voices for a deep, measured delivery:
+
+| | Male | Female |
+|---|---|---|
+| British | Alan (`en_GB-alan-medium`, the default) | Jenny Dioco (`en_GB-jenny_dioco-medium`) |
+| American | John (`en_US-john-medium`) | Kristin (`en_US-kristin-medium`) |
+| Australian | VCTK speaker p374 (`en_GB-vctk-medium#p374`) | VCTK speaker p335, a New Zealand accent (`en_GB-vctk-medium#p335`) |
+
+Piper has no Australian voices, so the Australian options are speakers from the [VCTK](https://datashare.ed.ac.uk/handle/10283/3443) recordings that Piper's many-speaker British voice was trained on. VCTK has two Australian men and no Australian woman, so the female option has a New Zealand accent. Each voice is downloaded the first time you use or preview it (60 to 80 MB).
+
+You can also set `audio_voice` in the config to any [Piper voice](https://rhasspy.github.io/piper-samples/), such as `"en_US-ryan-high"`; Settings keeps it as "Your own voice". The `high` voices sound a little better but take about 10 times longer to record. Listen isn't available on Windows on ARM, which Piper has no build for.
+
 ## Where files live
 
 | What | Where | Override |
@@ -227,6 +259,7 @@ The result is a digest of its own, marked 🌀 weird in the list, which you can 
 | Config | `~/.config/arxiv-digest/config.toml` | `ARXIV_DIGEST_CONFIG`, `--config` |
 | Database: papers seen, cached vectors, run history | `~/.local/share/arxiv-digest/` | `ARXIV_DIGEST_HOME` |
 | Model cache | `~/.cache/arxiv-digest/models/` | `ARXIV_DIGEST_HOME` |
+| Listen: voices, and the last 20 spoken digests | `~/.cache/arxiv-digest/voices/` and `audio/` | `ARXIV_DIGEST_HOME` |
 | Digests | In the database. Files only when you save one: **Save digest** downloads it with your browser, and `run --save` writes to `output_dir` (default `~/arxiv-digest`; when you work on the code with `uv run`, the project's git-ignored `digests/` folder) | |
 
 These follow the XDG conventions (`XDG_CONFIG_HOME` etc. are respected) on every platform, macOS included. `ARXIV_DIGEST_HOME` puts the database and model cache under one folder, which is handy for testing.
@@ -280,9 +313,9 @@ The entry runs the Python environment it was added from (the installer's is `~/.
 `arxiv-digest app` starts a small web server on your computer and opens it in your browser:
 
 - **Start page:** a greeting with your latest digest's numbers (new, shortlisted, picked) and a **Run today's digest** button. Below it, your interests appear as coloured chips: click one to edit it in a side panel, or click **+ Add interest**. **Save** keeps the changes; **Save and re-run latest announcement** also shows today's papers again, chosen for the updated interests.
-- **Digests:** every digest you've made, newest first, with older/newer links. **Save digest** at the top of one downloads it as HTML or Markdown.
+- **Digests:** every digest you've made, newest first, with older/newer links. **Save digest** at the top of one downloads it as HTML, Markdown or (once you've listened to it) MP3, and **Listen** reads it aloud.
 - **Run:** a live tracker follows each step (Fetch, Shortlist, Claude, Deep read, Done) with counts and a progress bar, and the new digest opens when it finishes. The full log is one click away. **🔭 Find crossovers** and **🌀 Find something weird** use the same tracker.
-- **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, and set the digest size and Claude model. Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
+- **Settings:** add, edit or remove interests (description, keywords, authors, required and excluded words), choose categories from arXiv's full list, set the digest size and Claude model, and pick the voice for Listen (with previews). Your config is checked before it's saved, so a mistake can't break it. Comments in the file are kept, except inside `[[interest]]` tables.
 
 **Background:** the app shows a night-sky image behind dark, translucent panels: a dark indigo sky with a soft copper and teal light trail. Set `app_background = "none"` in the config to turn it off, or point it at your own `.jpg`, `.png` or `.webp` file. The image is original artwork drawn entirely by code (`tools/make_background.py`, no photos involved). Regenerate it, or try another seed, with `uv run --with pillow python tools/make_background.py src/arxiv_digest/assets/background.jpg 12`.
 
@@ -318,5 +351,7 @@ uv run ruff check . && uv run ruff format --check .
 ## License
 
 [MIT](LICENSE) © 2026 Matt Wiemann.
+
+**Listen** uses [Piper](https://github.com/OHF-Voice/piper1-gpl) (GPL-3.0), which is installed as a separate package alongside arxiv-digest.
 
 The web app bundles the fonts [Inter](https://rsms.me/inter/), [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and [JetBrains Mono](https://www.jetbrains.com/lp/mono/), each under the [SIL Open Font License 1.1](src/arxiv_digest/assets/fonts/).

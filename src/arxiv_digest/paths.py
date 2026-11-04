@@ -6,6 +6,7 @@ locations are the same everywhere and easy to document:
     config  $XDG_CONFIG_HOME/arxiv-digest/config.toml   (default ~/.config/...)
     data    $XDG_DATA_HOME/arxiv-digest/                (default ~/.local/share/...)
     cache   $XDG_CACHE_HOME/arxiv-digest/               (default ~/.cache/...)
+            models/ (local embedding model), voices/ and audio/ (Listen)
 
 Overrides: ARXIV_DIGEST_CONFIG points at a different config file, and
 ARXIV_DIGEST_HOME puts the data and cache directories under one folder (useful
@@ -61,6 +62,16 @@ def database_path() -> Path:
 
 def model_cache_dir() -> Path:
     return cache_dir() / "models"
+
+
+def voices_dir() -> Path:
+    """Piper voices for Listen (audio.py), downloaded on first use."""
+    return cache_dir() / "voices"
+
+
+def audio_dir() -> Path:
+    """Spoken digests (MP3), so a digest is only spoken once."""
+    return cache_dir() / "audio"
 
 
 def source_checkout(package_dir: Path | None = None) -> Path | None:

@@ -8,15 +8,42 @@
   {% if newer %}<a href="/digest/{{ newer }}">Newer →</a>{% else %}<span></span>{% endif %}
 </div>
 {% if digest.entries %}
+{% set listen_running = listen and listen.job and listen.job.state == 'running' %}
 <div class="digest-actions">
+  {% if listen and not listen.ready and not listen_running %}
+  <form method="post" action="/digest/{{ row.id }}/audio" class="listen-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="listen-button"{% if listen.busy_elsewhere %} disabled title="Another digest is being read aloud; try again when it's done"{% else %} title="{{ 'Claude writes a two-minute podcast segment for each paper, and a' if listen.claude else 'A' }} voice on this computer reads the digest aloud.{% if not listen.voice_downloaded %} The first time downloads the voice (about 60 MB).{% endif %}"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4Zm11.5-1a5 5 0 0 1 0 7m2.8-9.8a9 9 0 0 1 0 12.6"/></svg>Listen</button>
+  </form>
+  {% endif %}
   <details class="save-menu">
     <summary class="save-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/></svg>Save digest<span class="caret" aria-hidden="true">▾</span></summary>
     <div class="save-options">
       <a href="/digest/{{ row.id }}/save/html" download>As HTML<small>A web page with working links and math; opens in any browser</small></a>
       <a href="/digest/{{ row.id }}/save/markdown" download>As Markdown<small>Plain text for notes apps like Obsidian, or GitHub</small></a>
+      {% if listen and listen.ready %}<a href="/digest/{{ row.id }}/audio.mp3" download="{{ listen.filename }}">As audio (MP3)<small>The digest read aloud, for any audio player</small></a>{% endif %}
     </div>
   </details>
 </div>
+{% if listen and (listen.ready or listen.job) %}
+<section class="listen-panel glass" id="listen"{% if listen_running %} data-poll="/digest/{{ row.id }}/audio/status"{% endif %}>
+  {% if listen.ready %}
+  <audio controls preload="metadata" src="/digest/{{ row.id }}/audio.mp3"></audio>
+  <div class="listen-meta">
+    <span class="muted">Read aloud on this computer by the voice <code>{{ listen.voice }}</code></span>
+    <a href="/digest/{{ row.id }}/audio.mp3" download="{{ listen.filename }}">Download MP3</a>
+  </div>
+  {% if listen.job and listen.job.message %}<p class="muted listen-note">{{ listen.job.message }}</p>{% endif %}
+  {% elif listen_running %}
+  <div class="listen-progress" aria-live="polite">
+    <span class="listen-step">{{ listen.job.step_text }}{% if listen.job.total %} {{ listen.job.done }} of {{ listen.job.total }} {{ listen.job.unit }}{% endif %}</span>
+    <div class="bar"><div class="fill"{% if listen.job.total %} style="width: {{ (100 * listen.job.done / listen.job.total) | round | int }}%"{% endif %}></div></div>
+  </div>
+  {% elif listen.job.state == 'error' %}
+  <p class="error">{{ listen.job.message }}</p>
+  {% endif %}
+</section>
+{% endif %}
 {% endif %}
 {{ body }}
 {% if row.html_path or row.markdown_path %}
@@ -33,5 +60,30 @@
       a.addEventListener("click", () => setTimeout(() => (menu.open = false), 150)));
     document.addEventListener("click", (e) => { if (!menu.contains(e.target)) menu.open = false; });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.open = false; });
+  })();
+  // Listen: follow the audio being made, then reload to show the player.
+  (() => {
+    const panel = document.querySelector(".listen-panel[data-poll]");
+    if (!panel) return;
+    const step = panel.querySelector(".listen-step");
+    const fill = panel.querySelector(".fill");
+    async function poll() {
+      let status;
+      try {
+        status = await (await fetch(panel.dataset.poll, {cache: "no-store"})).json();
+      } catch (e) {
+        setTimeout(poll, 3000);
+        return;
+      }
+      const job = status.job;
+      if (job && job.state === "running") {
+        step.textContent = job.step_text + (job.total ? ` ${job.done} of ${job.total} ${job.unit}` : "");
+        if (job.total) fill.style.width = `${Math.round((100 * job.done) / job.total)}%`;
+        setTimeout(poll, 1000);
+      } else {
+        window.location.reload();
+      }
+    }
+    poll();
   })();
 </script>{% endblock %}

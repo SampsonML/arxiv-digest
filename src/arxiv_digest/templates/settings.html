@@ -59,6 +59,30 @@
       </select>
     </label>
 
+    {% if voices %}
+    <h2 id="voice">Voice</h2>
+    <p class="muted">Reads the digest aloud when you press Listen on a digest. It runs on this computer; each voice is downloaded the first time you use or preview it (60 to 80 MB).</p>
+    <div class="voices" role="radiogroup" aria-label="Voice">
+      <span></span><span class="voice-head">Male</span><span class="voice-head">Female</span>
+      {% for accent, cells in voices.rows %}
+      <span class="voice-accent">{{ accent }}</span>
+      {% for cell in cells %}
+      <div class="voice-choice">
+        <label><input type="radio" name="audio_voice" value="{{ cell.voice }}"{% if cell.voice == form.values.audio_voice %} checked{% endif %}> {{ cell.label }}</label>
+        <button type="button" class="preview" data-voice="{{ cell.voice }}" aria-label="Preview {{ accent }} {{ loop.cycle('male', 'female') }} voice">▶ Preview</button>
+        {% if cell.note %}<span class="hint">{{ cell.note }}</span>{% endif %}
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% if voices.custom %}
+    <div class="voice-choice voice-custom">
+      <label><input type="radio" name="audio_voice" value="{{ voices.custom }}" checked> Your own voice: <code>{{ voices.custom }}</code></label>
+      <button type="button" class="preview" data-voice="{{ voices.custom }}" aria-label="Preview your own voice">▶ Preview</button>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <p class="save"><button type="submit" class="primary">Save settings</button></p>
     <p class="muted small">{% if exists %}Saved to{% else %}Will be created at{% endif %} <code>{{ config_path }}</code>. Comments in the file are kept, except inside interests. Other settings (e.g. the local model) are edited in the file.</p>
   </form>
@@ -88,5 +112,25 @@
     boxes.forEach((box) => box.addEventListener("change", update));
     update();
   });
+
+  // Voice previews: one plays at a time. The first preview of a voice downloads it,
+  // so the button says so while it waits.
+  (() => {
+    let current = null;
+    const reset = (button) => { button.textContent = "▶ Preview"; button.disabled = false; };
+    document.querySelectorAll(".voices .preview, .voice-custom .preview").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (current) { current.audio.pause(); reset(current.button); }
+        const audio = new Audio(`/voice-preview?voice=${encodeURIComponent(button.dataset.voice)}`);
+        current = {audio, button};
+        button.textContent = "Loading the voice…";
+        button.disabled = true;
+        audio.addEventListener("playing", () => { button.textContent = "Playing…"; });
+        audio.addEventListener("ended", () => reset(button));
+        audio.addEventListener("error", () => { button.textContent = "Couldn't load it"; button.disabled = false; });
+        audio.play().catch(() => {});
+      });
+    });
+  })();
 </script>
 {% endblock %}

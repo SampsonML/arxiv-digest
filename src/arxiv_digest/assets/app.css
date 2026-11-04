@@ -194,6 +194,63 @@ table.list td a { text-decoration: none; font-weight: 500; }
 .save-options a small { color: var(--muted); font-weight: 400; font-size: .8rem; line-height: 1.35; }
 .save-options a:hover, .save-options a:focus-visible { background: color-mix(in srgb, var(--accent) 16%, transparent); outline: none; }
 
+/* Listen: the digest read aloud */
+.digest-actions { gap: .6rem; align-items: center; }
+.listen-form { margin: 0; }
+.listen-button {
+  display: inline-flex; align-items: center; gap: .45rem; cursor: pointer;
+  font: inherit; font-weight: 600; font-size: .92rem; padding: .45rem .9rem; border-radius: 10px;
+  color: var(--fg); background: color-mix(in srgb, var(--card) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal) 55%, var(--border));
+  transition: background .15s, border-color .15s;
+}
+.listen-button:hover { background: color-mix(in srgb, var(--teal) 16%, transparent); border-color: var(--teal); }
+.listen-button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.listen-button:disabled { opacity: .55; cursor: not-allowed; }
+.listen-button svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.listen-panel {  /* lined up with the digest column below it */
+  max-width: 840px; width: calc(100% - 2.5rem); margin: 1.8rem auto -1rem; padding: .9rem 1.1rem;
+  box-sizing: border-box;
+}
+.listen-panel audio { width: 100%; display: block; }
+.listen-meta { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: .45rem; font-size: .85rem; }
+.listen-note { font-size: .85rem; margin: .45rem 0 0; }
+.listen-panel .error { margin: 0; }
+.listen-progress { display: flex; flex-direction: column; gap: .55rem; }
+.listen-step { font-weight: 600; }
+.listen-progress .fill::after {
+  content: ""; position: absolute; inset: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .75), transparent);
+  animation: streak 1.6s linear infinite;
+}
+.listen-progress .fill:not([style]) { width: 100%; opacity: .35; }
+
+/* Settings: the voice picker, accents by gender */
+.voices {
+  display: grid; grid-template-columns: max-content 1fr 1fr; gap: .55rem .9rem; align-items: start;
+  margin: .4rem 0 .8rem;
+}
+.voice-head { color: var(--muted); font-size: .85rem; font-weight: 600; }
+.voice-accent { font-weight: 600; padding-top: .55rem; }
+.voice-choice {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; padding: .45rem .7rem;
+  border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--card) 70%, transparent);
+}
+.voice-choice:has(input:checked) { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 12%, transparent); }
+form.settings .voice-choice label { display: inline-flex; align-items: center; gap: .45rem; margin: 0; font-weight: 600; cursor: pointer; }
+form.settings .voice-choice input[type=radio] {  /* not the full-width text-field look */
+  display: inline-block; width: auto; margin: 0; padding: 0; border: 0; background: none; box-shadow: none;
+  accent-color: var(--teal);
+}
+.voice-choice .hint { flex-basis: 100%; font-size: .78rem; }
+.voice-custom { margin-bottom: .8rem; }
+.preview {
+  margin-left: auto; font: inherit; font-size: .8rem; padding: .2rem .55rem; border-radius: 8px; cursor: pointer;
+  color: var(--fg); background: transparent; border: 1px solid color-mix(in srgb, var(--teal) 55%, var(--border));
+}
+.preview:hover { background: color-mix(in srgb, var(--teal) 16%, transparent); }
+.preview:disabled { opacity: .7; cursor: progress; }
+
 /* -- run tracker -------------------------------------------------------------- */
 .tracker { padding: 1.4rem 1.5rem 1.2rem; }
 .steps { list-style: none; margin: 0 0 1.1rem; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: .6rem; }

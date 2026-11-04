@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,12 @@ from . import paths
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEEP_READ_MODEL = "sonnet"  # deep reads use this unless deep_read_model is set
+AUDIO_VOICE = "en_GB-alan-medium"  # a deep, measured British voice for Listen (audio.py)
+# Piper voice names: <language>_<REGION>-<name>-<quality>, e.g. en_GB-alba-medium.
+VOICE_NAME = re.compile(
+    r"^(?P<language>[a-z]{2,3})_(?P<region>[A-Z]{2})-(?P<name>[A-Za-z0-9_]+)"
+    r"-(?P<quality>x_low|low|medium|high)$"
+)
 
 TOP_LEVEL_KEYS = {
     "categories",
@@ -35,6 +42,7 @@ TOP_LEVEL_KEYS = {
     "deep_reads",
     "deep_read_model",
     "app_background",
+    "audio_voice",
     "interest",
 }
 INTEREST_KEYS = {"name", "description", "keywords", "require", "exclude", "authors"}
@@ -100,6 +108,7 @@ class Config:
     deep_reads: int = 3  # top picks Claude reads in full (0: none)
     deep_read_model: str = DEEP_READ_MODEL
     app_background: str = "default"  # "default", "none", or a path to an image
+    audio_voice: str = AUDIO_VOICE  # the Piper voice for Listen
 
 
 def selection_fingerprint(config: Config) -> str:
@@ -261,6 +270,7 @@ def parse(text: str, path: Path) -> Config:
             data.get("deep_read_model", DEEP_READ_MODEL), "deep_read_model"
         ),
         app_background=_background(data.get("app_background", "default"), path),
+        audio_voice=_voice(data.get("audio_voice", AUDIO_VOICE)),
     )
 
 
@@ -268,6 +278,21 @@ def _model_name(value: Any, key: str) -> str:
     _expect(
         isinstance(value, str) and value.strip() != "",
         f'`{key}` must be a model name or alias, e.g. "sonnet"',
+    )
+    return value.strip()
+
+
+_SPEAKER = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _voice(value: Any) -> str:
+    """A Piper voice name, with "#speaker" to pick one speaker of a voice with many."""
+    model, _, speaker = value.strip().partition("#") if isinstance(value, str) else ("", "", "")
+    _expect(
+        VOICE_NAME.match(model) is not None and (not speaker or _SPEAKER.match(speaker)),
+        '`audio_voice` must be a Piper voice name like "en_GB-alan-medium", with'
+        ' "#speaker" for one speaker of a voice with many, like "en_GB-vctk-medium#p374"'
+        " (the voices are listed at https://huggingface.co/rhasspy/piper-voices)",
     )
     return value.strip()
 
@@ -364,6 +389,10 @@ def render_template(
         '# Background of `arxiv-digest app`: "default" (a night-sky image),',
         '# "none", or the path to your own .jpg/.png/.webp image.',
         '# app_background = "default"',
+        "",
+        "# The voice that reads a digest aloud (Listen in the app, `arxiv-digest audio`).",
+        "# It runs on this computer; it is downloaded the first time (~60 MB).",
+        f"# audio_voice = {_toml_str(AUDIO_VOICE)}",
         "",
         "# The local embedding model (downloaded once, ~90 MB, runs on the CPU).",
         '# "BAAI/bge-small-en-v1.5" ranks a little better but uses ~4x the CPU.',

@@ -5,9 +5,9 @@ import pytest
 from conftest import make_paper
 from starlette.testclient import TestClient
 
+from arxiv_digest import audio, paths
 from arxiv_digest import categories as cats
 from arxiv_digest import config as cfg
-from arxiv_digest import paths
 from arxiv_digest.claude_cli import ClaudeStatus
 from arxiv_digest.digest import Digest, Entry
 from arxiv_digest.pipeline import RunResult
@@ -68,8 +68,18 @@ def _no_run(conf, options, log):
     return RunResult(window_start=datetime.now(UTC), window_end=datetime.now(UTC))
 
 
-def _client(config_path, run=None, base_url="http://127.0.0.1:8765", account=None):
-    app = create_app(config_path, run=run or _no_run, token=TOKEN, account=account or FakeAccount())
+def _no_audio(conf, digest_id, log, progress):
+    raise AssertionError("no audio expected in this test")
+
+
+def _client(config_path, run=None, base_url="http://127.0.0.1:8765", account=None, make_audio=None):
+    app = create_app(
+        config_path,
+        run=run or _no_run,
+        make_audio=make_audio or _no_audio,
+        token=TOKEN,
+        account=account or FakeAccount(),
+    )
     return TestClient(app, base_url=base_url), app
 
 
@@ -725,3 +735,128 @@ def test_no_thanks_is_remembered(config_path, monkeypatch):
     assert 'class="card shortcut-offer"' in client.get("/").text
     client.post("/shortcut", data={"csrf": TOKEN, "action": "dismiss"})
     assert 'class="card shortcut-offer"' not in client.get("/").text
+
+
+def _fake_audio(release=None, error=None):
+    """Stands in for audio.make_audio_with_config: writes a small file where the MP3 goes."""
+
+    def make(conf, digest_id, log, progress):
+        progress("speak", {"done": 1, "total": 3})
+        log("Speaking…")
+        if release is not None:
+            release.wait(5)
+        if error is not None:
+            raise error
+        store = Store(paths.database_path())
+        try:
+            digest = store.get_digest(digest_id)[0]
+        finally:
+            store.close()
+        path = audio.audio_file(paths.audio_dir(), digest_id, digest, conf.audio_voice)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"ID3 fake mp3 " * 100)
+        return audio.AudioResult(path, digest, notes=["Read as written."])
+
+    return make
+
+
+def test_listen_reads_a_digest_aloud_in_the_background(config_path):
+    digest_id = _save_digest()
+    release = threading.Event()
+    client, app = _client(config_path, make_audio=_fake_audio(release))
+    page = client.get(f"/digest/{digest_id}").text
+    assert f'action="/digest/{digest_id}/audio"' in page and "Listen</button>" in page
+    assert "<audio" not in page and "As audio (MP3)" not in page
+    assert client.post(f"/digest/{digest_id}/audio").status_code == 403
+
+    response = client.post(
+        f"/digest/{digest_id}/audio", data={"csrf": TOKEN}, follow_redirects=False
+    )
+    assert response.headers["location"] == f"/digest/{digest_id}#listen"
+    status = client.get(f"/digest/{digest_id}/audio/status").json()
+    assert status["job"]["state"] == "running" and not status["ready"]
+    assert status["job"]["step_text"] == "Recording the episode on this computer…"
+    assert status["job"]["unit"] == "paragraphs"
+    assert (status["job"]["done"], status["job"]["total"]) == (1, 3)
+    page = client.get(f"/digest/{digest_id}").text
+    assert f'data-poll="/digest/{digest_id}/audio/status"' in page and 'style="width: 33%"' in page
+    assert "Listen</button>" not in page
+    app.state.on_quit = lambda: None
+    assert client.post("/quit", data={"csrf": TOKEN}).status_code == 409  # waits for it
+
+    release.set()
+    app.state.audio.thread.join(5)
+    status = client.get(f"/digest/{digest_id}/audio/status").json()
+    assert status["job"]["state"] == "done" and status["ready"]
+    page = client.get(f"/digest/{digest_id}").text
+    assert f'<audio controls preload="metadata" src="/digest/{digest_id}/audio.mp3">' in page
+    assert 'download="arxiv-digest-2026-11-03.mp3">As audio (MP3)' in page
+    assert "Read as written." in page and "Listen</button>" not in page
+
+    mp3 = client.get(f"/digest/{digest_id}/audio.mp3")
+    assert mp3.status_code == 200 and mp3.headers["content-type"] == "audio/mpeg"
+    part = client.get(f"/digest/{digest_id}/audio.mp3", headers={"Range": "bytes=0-9"})
+    assert part.status_code == 206 and part.content == b"ID3 fake m"  # the player can seek
+
+
+def test_listen_problems_are_shown_and_can_be_retried(config_path):
+    digest_id = _save_digest()
+    client, app = _client(
+        config_path, make_audio=_fake_audio(error=audio.AudioError("the voice is missing"))
+    )
+    client.post(f"/digest/{digest_id}/audio", data={"csrf": TOKEN})
+    app.state.audio.thread.join(5)
+    page = client.get(f"/digest/{digest_id}").text
+    assert "Couldn&#39;t make the audio: the voice is missing." in page
+    assert "Listen</button>" in page  # try again
+    assert client.get(f"/digest/{digest_id}/audio.mp3").status_code == 404
+    assert client.get("/digest/999/audio.mp3").status_code == 404
+
+
+def test_settings_voice_picker(config_path):
+    client, _ = _client(config_path)
+    page = client.get("/settings").text
+    for voice in audio.VOICE_CHOICES.values():
+        assert f'name="audio_voice" value="{voice}"' in page
+    assert 'value="en_GB-alan-medium" checked' in page  # the default
+    assert "New Zealand accent: no Australian woman" in page
+    assert "Your own voice" not in page
+
+    form = _form(audio_voice="en_GB-vctk-medium#p374")
+    saved = client.post("/settings", data=form, follow_redirects=False)
+    assert saved.status_code == 303, saved.text
+    assert cfg.load(config_path).audio_voice == "en_GB-vctk-medium#p374"
+    assert "# my own comment" in config_path.read_text()
+    assert 'value="en_GB-vctk-medium#p374" checked' in client.get("/settings").text
+
+
+def test_settings_keeps_a_voice_set_by_hand(config_path):
+    config_path.write_text('audio_voice = "en_US-ryan-high"\n' + config_path.read_text())
+    client, _ = _client(config_path)
+    page = client.get("/settings").text
+    assert 'value="en_US-ryan-high" checked> Your own voice' in page
+
+
+def test_voice_previews(config_path, monkeypatch):
+    made = []
+
+    def fake_preview(voice, previews_dir):
+        made.append(voice)
+        path = previews_dir / "preview.mp3"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"ID3 preview")
+        return path
+
+    monkeypatch.setattr(audio, "voice_preview", fake_preview)
+    client, _ = _client(config_path)
+    response = client.get("/voice-preview", params={"voice": "en_US-kristin-medium"})
+    assert response.status_code == 200 and response.headers["content-type"] == "audio/mpeg"
+    assert made == ["en_US-kristin-medium"]
+    assert client.get("/voice-preview", params={"voice": "en_US-other-medium"}).status_code == 404
+
+    def broken(voice, previews_dir):
+        raise audio.AudioError("offline")
+
+    monkeypatch.setattr(audio, "voice_preview", broken)
+    failed = client.get("/voice-preview", params={"voice": "en_GB-alan-medium"})
+    assert failed.status_code == 502 and "offline" in failed.text
